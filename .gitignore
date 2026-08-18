@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Generated data (regenerate with scripts/generate_sample_inbox.py + run_batch.py)
+data/inbox_simulado/
+data/salida/
+
+# Environment
+.env
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

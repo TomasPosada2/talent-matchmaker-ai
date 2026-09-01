@@ -63,3 +63,45 @@ def validar_perfil(perfil: dict) -> tuple[bool, str | None]:
         return True, None
     except jsonschema.exceptions.ValidationError as e:
         return False, str(e.message)
+
+
+# HU-13: el ranking del agente de matching debe venir con evidencia citada
+# por cada requisito que se le atribuye a un candidato — un item sin
+# "justificacion" es tan inválido como un perfil sin "evidencia".
+_JUSTIFICACION_ITEM = {
+    "type": "object",
+    "properties": {
+        "requisito": {"type": "string"},
+        "evidencia": {"type": "string"},
+    },
+    "required": ["requisito", "evidencia"],
+    "additionalProperties": False,
+}
+
+RANKING_ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "email_id": {"type": "string"},
+        "puntaje": {"type": "number", "minimum": 0, "maximum": 100},
+        "justificacion": {"type": "array", "items": _JUSTIFICACION_ITEM},
+        "requisitos_sin_evidencia": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["email_id", "puntaje", "justificacion"],
+    "additionalProperties": False,
+}
+
+RANKING_SCHEMA = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "RankingCandidatos",
+    "type": "array",
+    "items": RANKING_ITEM_SCHEMA,
+}
+
+
+def validar_ranking(ranking: list) -> tuple[bool, str | None]:
+    """Valida el ranking final del agente contra RANKING_SCHEMA."""
+    try:
+        jsonschema.validate(instance=ranking, schema=RANKING_SCHEMA)
+        return True, None
+    except jsonschema.exceptions.ValidationError as e:
+        return False, str(e.message)

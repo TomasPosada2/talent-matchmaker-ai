@@ -12,6 +12,9 @@ from pathlib import Path
 
 import pdfplumber
 from docx import Document
+from docx.oxml.ns import qn
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 
 logger = logging.getLogger("text_extractor")
 
@@ -25,16 +28,34 @@ class TextoExtraido:
     motivo: str | None = None
 
 
+def _iter_bloques(doc: Document):
+    """
+    BUG-01: iterar doc.paragraphs y doc.tables por separado pierde la posición
+    real de las tablas en el documento (siempre quedan al final). Se recorre
+    el XML del cuerpo en orden para intercalar párrafos y tablas tal como
+    aparecen realmente en el CV.
+    """
+    for hijo in doc.element.body.iterchildren():
+        if hijo.tag == qn("w:p"):
+            yield Paragraph(hijo, doc)
+        elif hijo.tag == qn("w:tbl"):
+            yield Table(hijo, doc)
+
+
 def _extraer_docx(ruta: Path) -> list[str]:
     doc = Document(ruta)
-    lineas = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
-    # Incluir texto de tablas, si las hay (algunos CVs usan tablas para layout)
-    for tabla in doc.tables:
-        for fila in tabla.rows:
-            for celda in fila.cells:
-                texto_celda = celda.text.strip()
-                if texto_celda:
-                    lineas.append(texto_celda)
+    lineas = []
+    for bloque in _iter_bloques(doc):
+        if isinstance(bloque, Paragraph):
+            texto = bloque.text.strip()
+            if texto:
+                lineas.append(texto)
+        else:  # Table
+            for fila in bloque.rows:
+                for celda in fila.cells:
+                    texto_celda = celda.text.strip()
+                    if texto_celda:
+                        lineas.append(texto_celda)
     return lineas
 
 

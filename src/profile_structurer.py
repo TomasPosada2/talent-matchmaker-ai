@@ -14,6 +14,10 @@ import re
 
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 TELEFONO_REGEX = re.compile(r"(\+?\d[\d\s().-]{6,}\d)")
+# BUG-02: un rango de años como "(2018-2021)" cae dentro del regex de arriba
+# (misma forma: dígitos-guion-dígitos entre paréntesis). Se descarta explícitamente
+# para no alucinar un teléfono a partir de fechas de experiencia laboral.
+RANGO_ANIOS_REGEX = re.compile(r"^\(?\d{4}\s*-\s*\d{4}\)?$")
 
 # Encabezados de sección típicos en CVs (español e inglés), en minúsculas.
 ENCABEZADOS_EDUCACION = {"educación", "educacion", "formación académica", "formacion academica", "education"}
@@ -82,9 +86,10 @@ def _extraer_email(texto_completo: str) -> tuple[str | None, str | None]:
 
 
 def _extraer_telefono(texto_completo: str) -> tuple[str | None, str | None]:
-    match = TELEFONO_REGEX.search(texto_completo)
-    if match:
+    for match in TELEFONO_REGEX.finditer(texto_completo):
         valor = match.group(0).strip()
+        if RANGO_ANIOS_REGEX.match(valor):
+            continue
         return valor, valor
     return None, None
 

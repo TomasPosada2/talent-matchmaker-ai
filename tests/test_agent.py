@@ -274,3 +274,114 @@ def test_issue35_valida_numero_de_intentos():
                 max_intentos=0,
             )
         )
+
+
+# ============================================================
+# Sprint 4 - Issue #37
+# Structured logging of Thought / Action / Observation
+# ============================================================
+
+import json
+import logging
+
+from src.agent import _registrar_paso_agente
+
+
+def test_issue37_registra_thought_como_json(caplog):
+    """
+    Un Thought debe generar un log JSON estructurado.
+    """
+
+    with caplog.at_level(logging.INFO, logger="agent"):
+        evento = _registrar_paso_agente(
+            "thought",
+            contenido="Analizando requisitos de la vacante",
+        )
+
+    assert evento["evento"] == "agent_step"
+    assert evento["tipo"] == "thought"
+    assert evento["contenido"] == "Analizando requisitos de la vacante"
+
+    registro = json.loads(caplog.records[-1].message)
+
+    assert registro["evento"] == "agent_step"
+    assert registro["tipo"] == "thought"
+    assert registro["contenido"] == "Analizando requisitos de la vacante"
+
+
+def test_issue37_registra_action_con_tool_y_argumentos(caplog):
+    """
+    Una Action debe registrar la tool utilizada y sus argumentos.
+    """
+
+    argumentos = {
+        "email_id": "candidato-01",
+        "requisito": "Python",
+    }
+
+    with caplog.at_level(logging.INFO, logger="agent"):
+        evento = _registrar_paso_agente(
+            "accion",
+            tool="verificar_evidencia",
+            argumentos=argumentos,
+        )
+
+    assert evento["evento"] == "agent_step"
+    assert evento["tipo"] == "accion"
+    assert evento["tool"] == "verificar_evidencia"
+    assert evento["argumentos"] == argumentos
+
+    registro = json.loads(caplog.records[-1].message)
+
+    assert registro["tipo"] == "accion"
+    assert registro["tool"] == "verificar_evidencia"
+    assert registro["argumentos"] == argumentos
+
+
+def test_issue37_registra_observacion(caplog):
+    """
+    Una Observation debe registrar el contenido recibido
+    y si representa o no un error.
+    """
+
+    with caplog.at_level(logging.INFO, logger="agent"):
+        evento = _registrar_paso_agente(
+            "observacion",
+            contenido={
+                "tiene_evidencia": True,
+                "campo": "habilidades",
+            },
+            es_error=False,
+        )
+
+    assert evento["evento"] == "agent_step"
+    assert evento["tipo"] == "observacion"
+    assert evento["es_error"] is False
+
+    registro = json.loads(caplog.records[-1].message)
+
+    assert registro["tipo"] == "observacion"
+    assert registro["es_error"] is False
+
+
+def test_issue37_registra_observacion_con_error(caplog):
+    """
+    Una Observation fallida debe quedar explícitamente
+    identificada como error en el log.
+    """
+
+    with caplog.at_level(logging.INFO, logger="agent"):
+        evento = _registrar_paso_agente(
+            "observacion",
+            contenido="Tool temporalmente no disponible",
+            es_error=True,
+        )
+
+    assert evento["tipo"] == "observacion"
+    assert evento["es_error"] is True
+
+    registro = json.loads(caplog.records[-1].message)
+
+    assert registro["evento"] == "agent_step"
+    assert registro["tipo"] == "observacion"
+    assert registro["es_error"] is True

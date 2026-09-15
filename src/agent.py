@@ -6,9 +6,13 @@ HU-14: Manejo de errores del agente (tool falla, LLM alucina un requisito).
 Sprint 4:
 - Migración al Claude Agent SDK.
 - #35: Retry/backoff strategy for failing agent tool calls.
+- #37: Structured logging of agent Thought/Action/Observation steps.
 
 Las llamadas a tools de negocio utilizan reintentos con backoff exponencial
-para recuperarse de fallos transitorios sin tumbar el agent loop.
+para recuperarse de fallos transitorios.
+
+Los pasos Thought/Action/Observation se registran como eventos JSON
+estructurados para facilitar trazabilidad, auditoría y análisis posterior.
 """
 
 import asyncio
@@ -32,13 +36,20 @@ from claude_agent_sdk import (
 
 from . import agent_tools, schema
 
+
 logger = logging.getLogger("agent")
+
 
 MAX_PASOS = 8
 MODELO = "claude-sonnet-5"
 SERVIDOR_MCP = "talent_matchmaker"
 
+
+# ============================================================
 # Sprint 4 - Issue #35
+# Retry/backoff strategy for failing agent tool calls
+# ============================================================
+
 MAX_REINTENTOS_TOOL = 3
 BACKOFF_INICIAL_SEGUNDOS = 0.25
 
@@ -59,6 +70,63 @@ Cuando termines de evaluar a todos los candidatos relevantes, responde
 """
 
 
+# ============================================================
+# Sprint 4 - Issue #37
+# Structured logging Thought / Action / Observation
+# ============================================================
+
+def _registrar_paso_agente(
+    tipo: str,
+    *,
+    contenido=None,
+    tool: str | None = None,
+    argumentos: dict | None = None,
+    es_error: bool = False,
+) -> dict:
+    """
+    Construye y registra un evento estructurado del ciclo del agente.
+
+    Los eventos se almacenan como JSON para facilitar:
+    - auditoría,
+    - trazabilidad,
+    - búsqueda,
+    - procesamiento automático,
+    - debugging.
+
+    Tipos esperados:
+        thought
+        accion
+        observacion
+    """
+
+    evento = {
+        "evento": "agent_step",
+        "tipo": tipo,
+    }
+
+    if contenido is not None:
+        evento["contenido"] = contenido
+
+    if tool is not None:
+        evento["tool"] = tool
+
+    if argumentos is not None:
+        evento["argumentos"] = argumentos
+
+    if tipo == "observacion":
+        evento["es_error"] = es_error
+
+    logger.info(
+        json.dumps(
+            evento,
+            ensure_ascii=False,
+            default=str,
+        )
+    )
+
+    return evento
+
+
 class ResultadoAgente:
     def __init__(
         self,
@@ -71,6 +139,11 @@ class ResultadoAgente:
         self.error = error
 
 
+# ============================================================
+# Sprint 4 - Issue #35
+# Función genérica de retry/backoff
+# ============================================================
+
 async def _ejecutar_con_reintentos(
     operacion: Callable[[], Awaitable[Any] | Any],
     nombre_tool: str,
@@ -78,36 +151,45 @@ async def _ejecutar_con_reintentos(
     backoff_inicial: float = BACKOFF_INICIAL_SEGUNDOS,
 ) -> Any:
     """
-    Sprint 4 - Issue #35.
-
     Ejecuta una operación y reintenta automáticamente cuando ocurre
     una excepción.
 
-    El tiempo de espera crece exponencialmente:
+    Backoff exponencial:
 
         intento 1 falla -> espera 0.25 s
         intento 2 falla -> espera 0.50 s
         intento 3 falla -> propaga el error
 
-    Los resultados válidos, incluso aquellos que representan un error
-    lógico de negocio, no se reintentan. Solo se reintentan excepciones.
+    Solo se reintentan excepciones.
+
+    Los errores lógicos de negocio que son devueltos normalmente
+    por una función no provocan reintentos.
     """
 
     if max_intentos < 1:
-        raise ValueError("max_intentos debe ser al menos 1")
+        raise ValueError(
+            "max_intentos debe ser al menos 1"
+        )
 
     ultimo_error: Exception | None = None
 
-    for intento in range(1, max_intentos + 1):
+    for intento in range(
+        1,
+        max_intentos + 1,
+    ):
         try:
             resultado = operacion()
 
-            if isinstance(resultado, Awaitable):
+            if isinstance(
+                resultado,
+                Awaitable,
+            ):
                 resultado = await resultado
 
             if intento > 1:
                 logger.info(
-                    "Tool '%s' recuperada correctamente en intento %d/%d.",
+                    "Tool '%s' recuperada correctamente "
+                    "en intento %d/%d.",
                     nombre_tool,
                     intento,
                     max_intentos,
@@ -129,15 +211,21 @@ async def _ejecutar_con_reintentos(
             if intento >= max_intentos:
                 break
 
-            espera = backoff_inicial * (2 ** (intento - 1))
+            espera = (
+                backoff_inicial
+                * (2 ** (intento - 1))
+            )
 
             logger.info(
-                "Reintentando tool '%s' en %.2f segundos.",
+                "Reintentando tool '%s' "
+                "en %.2f segundos.",
                 nombre_tool,
                 espera,
             )
 
-            await asyncio.sleep(espera)
+            await asyncio.sleep(
+                espera
+            )
 
     logger.error(
         "Tool '%s' falló después de %d intentos.",
@@ -146,25 +234,39 @@ async def _ejecutar_con_reintentos(
     )
 
     assert ultimo_error is not None
+
     raise ultimo_error
 
 
-def construir_tools(perfiles: list[dict]) -> list:
+# ============================================================
+# Construcción de tools MCP
+# ============================================================
+
+def construir_tools(
+    perfiles: list[dict],
+) -> list:
     """
-    Expone agent_tools.py como tools del Claude Agent SDK, cerrando sobre los
-    perfiles del batch actual.
+    Expone agent_tools.py como tools del Claude Agent SDK.
+
+    El agente nunca lee directamente el CV crudo.
 
     Sprint 4 #35:
-    las llamadas a las funciones de negocio están protegidas por retry con
-    backoff exponencial ante excepciones transitorias.
+    las llamadas a funciones de negocio están protegidas
+    mediante retry con backoff exponencial.
     """
 
     @tool(
         "consultar_perfiles",
-        "Lista los candidatos disponibles, o consulta uno por email_id.",
+        (
+            "Lista los candidatos disponibles, "
+            "o consulta uno por email_id."
+        ),
         {"email_id": str},
     )
-    async def herramienta_consultar_perfiles(args: dict) -> dict:
+    async def herramienta_consultar_perfiles(
+        args: dict,
+    ) -> dict:
+
         try:
             resultado = await _ejecutar_con_reintentos(
                 lambda: agent_tools.consultar_perfiles(
@@ -188,7 +290,8 @@ def construir_tools(perfiles: list[dict]) -> list:
 
         except Exception as error:
             logger.error(
-                "Error definitivo en consultar_perfiles: %s",
+                "Error definitivo en "
+                "consultar_perfiles: %s",
                 error,
             )
 
@@ -197,8 +300,10 @@ def construir_tools(perfiles: list[dict]) -> list:
                     {
                         "type": "text",
                         "text": (
-                            "Error: la tool consultar_perfiles "
-                            f"falló después de {MAX_REINTENTOS_TOOL} "
+                            "Error: la tool "
+                            "consultar_perfiles falló "
+                            f"después de "
+                            f"{MAX_REINTENTOS_TOOL} "
                             f"intentos: {error}"
                         ),
                     }
@@ -209,13 +314,21 @@ def construir_tools(perfiles: list[dict]) -> list:
     @tool(
         "verificar_evidencia",
         (
-            "Verifica si un requisito de la vacante tiene evidencia textual "
-            "real en el perfil de un candidato. Nunca asumas que un candidato "
-            "cumple un requisito sin llamar a esta tool primero."
+            "Verifica si un requisito de la vacante "
+            "tiene evidencia textual real en el perfil "
+            "de un candidato. Nunca asumas que un "
+            "candidato cumple un requisito sin llamar "
+            "a esta tool primero."
         ),
-        {"email_id": str, "requisito": str},
+        {
+            "email_id": str,
+            "requisito": str,
+        },
     )
-    async def herramienta_verificar_evidencia(args: dict) -> dict:
+    async def herramienta_verificar_evidencia(
+        args: dict,
+    ) -> dict:
+
         try:
             candidatos = await _ejecutar_con_reintentos(
                 lambda: agent_tools.consultar_perfiles(
@@ -227,7 +340,8 @@ def construir_tools(perfiles: list[dict]) -> list:
 
         except Exception as error:
             logger.error(
-                "Error definitivo consultando candidato: %s",
+                "Error definitivo consultando "
+                "candidato: %s",
                 error,
             )
 
@@ -236,19 +350,20 @@ def construir_tools(perfiles: list[dict]) -> list:
                     {
                         "type": "text",
                         "text": (
-                            "Error: no se pudo consultar el candidato "
-                            f"después de {MAX_REINTENTOS_TOOL} intentos: "
-                            f"{error}"
+                            "Error: no se pudo consultar "
+                            "el candidato después de "
+                            f"{MAX_REINTENTOS_TOOL} "
+                            f"intentos: {error}"
                         ),
                     }
                 ],
                 "is_error": True,
             }
 
+        # HU-14:
+        # Un candidato inexistente es un error lógico.
+        # No debe provocar retry.
         if not candidatos:
-            # HU-14:
-            # Una referencia a un candidato inexistente es un error lógico,
-            # no un fallo transitorio. Por tanto NO debe reintentarse.
             return {
                 "content": [
                     {
@@ -266,7 +381,10 @@ def construir_tools(perfiles: list[dict]) -> list:
             resultado = await _ejecutar_con_reintentos(
                 lambda: agent_tools.verificar_evidencia(
                     candidatos[0],
-                    args.get("requisito", ""),
+                    args.get(
+                        "requisito",
+                        "",
+                    ),
                 ),
                 "verificar_evidencia",
             )
@@ -285,7 +403,8 @@ def construir_tools(perfiles: list[dict]) -> list:
 
         except Exception as error:
             logger.error(
-                "Error definitivo en verificar_evidencia: %s",
+                "Error definitivo en "
+                "verificar_evidencia: %s",
                 error,
             )
 
@@ -294,8 +413,10 @@ def construir_tools(perfiles: list[dict]) -> list:
                     {
                         "type": "text",
                         "text": (
-                            "Error: la tool verificar_evidencia "
-                            f"falló después de {MAX_REINTENTOS_TOOL} "
+                            "Error: la tool "
+                            "verificar_evidencia falló "
+                            f"después de "
+                            f"{MAX_REINTENTOS_TOOL} "
                             f"intentos: {error}"
                         ),
                     }
@@ -303,25 +424,32 @@ def construir_tools(perfiles: list[dict]) -> list:
                 "is_error": True,
             }
 
-
     return [
         herramienta_consultar_perfiles,
         herramienta_verificar_evidencia,
     ]
 
 
+# ============================================================
+# Agent loop
+# ============================================================
+
 async def rankear_candidatos_async(
     vacante: dict,
     perfiles: list[dict],
 ) -> ResultadoAgente:
     """
-    Corre el agent loop vía Claude Agent SDK.
+    Ejecuta el agent loop mediante Claude Agent SDK.
 
-    El SDK decide cuándo pensar, cuándo llamar una tool y cuándo entregar
-    la respuesta final, hasta MAX_PASOS turnos.
+    El SDK decide cuándo:
+    - pensar,
+    - ejecutar una tool,
+    - procesar la observación,
+    - entregar la respuesta final.
 
-    Los fallos del framework, red, JSON inválido o ranking inválido se
-    capturan y se reportan mediante ResultadoAgente.error.
+    Sprint 4 #37:
+    cada paso Thought / Action / Observation queda además
+    registrado como un evento JSON estructurado.
     """
 
     opciones = ClaudeAgentOptions(
@@ -330,18 +458,27 @@ async def rankear_candidatos_async(
         mcp_servers={
             SERVIDOR_MCP: create_sdk_mcp_server(
                 name=SERVIDOR_MCP,
-                tools=construir_tools(perfiles),
+                tools=construir_tools(
+                    perfiles
+                ),
             )
         },
         allowed_tools=[
-            f"mcp__{SERVIDOR_MCP}__consultar_perfiles",
-            f"mcp__{SERVIDOR_MCP}__verificar_evidencia",
+            (
+                f"mcp__{SERVIDOR_MCP}"
+                "__consultar_perfiles"
+            ),
+            (
+                f"mcp__{SERVIDOR_MCP}"
+                "__verificar_evidencia"
+            ),
         ],
         max_turns=MAX_PASOS,
         permission_mode="bypassPermissions",
     )
 
     pasos: list[dict] = []
+
     texto_final = ""
 
     try:
@@ -352,43 +489,92 @@ async def rankear_candidatos_async(
             ),
             options=opciones,
         ):
-            if isinstance(mensaje, AssistantMessage):
+
+            # ------------------------------------------------
+            # THOUGHT / ACTION
+            # ------------------------------------------------
+
+            if isinstance(
+                mensaje,
+                AssistantMessage,
+            ):
+
                 for bloque in mensaje.content:
-                    if isinstance(bloque, TextBlock):
-                        pasos.append(
-                            {
-                                "tipo": "thought",
-                                "contenido": bloque.text,
-                            }
+
+                    if isinstance(
+                        bloque,
+                        TextBlock,
+                    ):
+
+                        evento = _registrar_paso_agente(
+                            "thought",
+                            contenido=bloque.text,
                         )
+
+                        pasos.append(
+                            evento
+                        )
+
                         texto_final = bloque.text
 
-                    elif isinstance(bloque, ToolUseBlock):
-                        pasos.append(
-                            {
-                                "tipo": "accion",
-                                "tool": bloque.name,
-                                "argumentos": bloque.input,
-                            }
+                    elif isinstance(
+                        bloque,
+                        ToolUseBlock,
+                    ):
+
+                        evento = _registrar_paso_agente(
+                            "accion",
+                            tool=bloque.name,
+                            argumentos=bloque.input,
                         )
+
+                        pasos.append(
+                            evento
+                        )
+
+            # ------------------------------------------------
+            # OBSERVATION
+            # ------------------------------------------------
 
             elif (
-                isinstance(mensaje, UserMessage)
-                and isinstance(mensaje.content, list)
+                isinstance(
+                    mensaje,
+                    UserMessage,
+                )
+                and isinstance(
+                    mensaje.content,
+                    list,
+                )
             ):
+
                 for bloque in mensaje.content:
-                    if isinstance(bloque, ToolResultBlock):
-                        pasos.append(
-                            {
-                                "tipo": "observacion",
-                                "contenido": bloque.content,
-                                "es_error": bool(
-                                    bloque.is_error
-                                ),
-                            }
+
+                    if isinstance(
+                        bloque,
+                        ToolResultBlock,
+                    ):
+
+                        evento = _registrar_paso_agente(
+                            "observacion",
+                            contenido=bloque.content,
+                            es_error=bool(
+                                bloque.is_error
+                            ),
                         )
 
-            elif isinstance(mensaje, ResultMessage):
+                        pasos.append(
+                            evento
+                        )
+
+            # ------------------------------------------------
+            # RESULTADO FINAL
+            # ------------------------------------------------
+
+            elif isinstance(
+                mensaje,
+                ResultMessage,
+            ):
+
                 if mensaje.result:
                     texto_final = mensaje.result
 
@@ -401,10 +587,14 @@ async def rankear_candidatos_async(
                     return ResultadoAgente(
                         None,
                         pasos,
-                        f"Error del agente: {mensaje.result}",
+                        (
+                            "Error del agente: "
+                            f"{mensaje.result}"
+                        ),
                     )
 
     except Exception as e:
+
         logger.error(
             "Error corriendo el agent loop "
             "(Claude Agent SDK): %s",
@@ -414,14 +604,30 @@ async def rankear_candidatos_async(
         return ResultadoAgente(
             None,
             pasos,
-            f"Error del framework: {e}",
+            (
+                "Error del framework: "
+                f"{e}"
+            ),
         )
 
-    try:
-        respuesta_final = json.loads(texto_final)
-        ranking = respuesta_final.get("ranking")
+    # ========================================================
+    # Validación del resultado final
+    # ========================================================
 
-    except (json.JSONDecodeError, AttributeError) as e:
+    try:
+        respuesta_final = json.loads(
+            texto_final
+        )
+
+        ranking = respuesta_final.get(
+            "ranking"
+        )
+
+    except (
+        json.JSONDecodeError,
+        AttributeError,
+    ) as e:
+
         logger.error(
             "El agente no devolvió JSON válido "
             "como respuesta final: %s",
@@ -431,23 +637,33 @@ async def rankear_candidatos_async(
         return ResultadoAgente(
             None,
             pasos,
-            f"Respuesta final inválida: {e}",
+            (
+                "Respuesta final inválida: "
+                f"{e}"
+            ),
         )
 
-    es_valido, error_schema = schema.validar_ranking(
-        ranking or []
+    es_valido, error_schema = (
+        schema.validar_ranking(
+            ranking or []
+        )
     )
 
     if not es_valido:
+
         logger.error(
-            "Ranking inválido contra el schema: %s",
+            "Ranking inválido contra "
+            "el schema: %s",
             error_schema,
         )
 
         return ResultadoAgente(
             None,
             pasos,
-            f"Ranking inválido: {error_schema}",
+            (
+                "Ranking inválido: "
+                f"{error_schema}"
+            ),
         )
 
     return ResultadoAgente(
@@ -456,14 +672,19 @@ async def rankear_candidatos_async(
     )
 
 
+# ============================================================
+# Wrapper síncrono
+# ============================================================
+
 def rankear_candidatos(
     vacante: dict,
     perfiles: list[dict],
 ) -> ResultadoAgente:
     """
-    Wrapper síncrono para llamadores no-async
-    (tests, app.py, run_batch.py).
+    Wrapper síncrono para llamadores no-async:
+    tests, app.py y run_batch.py.
     """
+
     return asyncio.run(
         rankear_candidatos_async(
             vacante,

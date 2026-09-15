@@ -96,3 +96,108 @@ def test_perfil_invalido_es_rechazado():
     es_valido, error = schema.validar_perfil(perfil_malformado)
     assert es_valido is False
     assert error is not None
+
+
+# ============================================================
+# Sprint 4 - HU-16
+# More robust name heuristic for atypical CV templates
+# ============================================================
+
+from src.profile_structurer import _extraer_nombre
+
+
+def test_hu16_nombre_despues_de_titulo_cv():
+    """
+    El nombre puede aparecer después de un título genérico del documento.
+    """
+    lineas = [
+        "CURRICULUM VITAE",
+        "",
+        "Juan Carlos Pérez Gómez",
+        "juan.perez@email.com",
+        "+57 300 123 4567",
+    ]
+
+    nombre, evidencia = _extraer_nombre(lineas)
+
+    assert nombre == "Juan Carlos Pérez Gómez"
+    assert evidencia == "Juan Carlos Pérez Gómez"
+
+
+def test_hu16_nombre_despues_de_datos_contacto():
+    """
+    El nombre puede aparecer después de información de contacto.
+    """
+    lineas = [
+        "HOJA DE VIDA",
+        "Email: maria@email.com",
+        "Teléfono: +57 301 555 5555",
+        "",
+        "María Fernanda López",
+        "Experiencia",
+    ]
+
+    nombre, evidencia = _extraer_nombre(lineas)
+
+    assert nombre == "María Fernanda López"
+    assert evidencia == "María Fernanda López"
+
+
+def test_hu16_descarta_urls_antes_del_nombre():
+    """
+    Una URL ubicada antes del nombre no debe ser interpretada
+    como nombre del candidato.
+    """
+    lineas = [
+        "RESUME",
+        "https://www.linkedin.com/in/candidato",
+        "www.portfolio.com",
+        "",
+        "Carlos Andrés Ramírez",
+        "Skills",
+    ]
+
+    nombre, evidencia = _extraer_nombre(lineas)
+
+    assert nombre == "Carlos Andrés Ramírez"
+    assert evidencia == "Carlos Andrés Ramírez"
+
+
+def test_hu16_nombre_fuera_de_primeras_tres_lineas():
+    """
+    La heurística debe encontrar nombres que aparecen después
+    de las primeras tres líneas del CV.
+    """
+    lineas = [
+        "CURRICULUM VITAE",
+        "",
+        "email: ana@email.com",
+        "+57 310 555 1234",
+        "",
+        "Ana Sofía Martínez",
+        "Educación",
+    ]
+
+    nombre, evidencia = _extraer_nombre(lineas)
+
+    assert nombre == "Ana Sofía Martínez"
+    assert evidencia == "Ana Sofía Martínez"
+
+
+def test_hu16_no_inventa_nombre_sin_candidato_valido():
+    """
+    Si no existe evidencia suficiente para identificar un nombre,
+    la función debe mantener el principio anti-alucinación.
+    """
+    lineas = [
+        "CURRICULUM VITAE",
+        "email: candidato@email.com",
+        "+57 300 123 4567",
+        "https://www.linkedin.com/in/candidato",
+        "Experiencia",
+    ]
+
+    nombre, evidencia = _extraer_nombre(lineas)
+
+    assert nombre is None
+    assert evidencia is None

@@ -14,7 +14,7 @@ El loop completo (agent.rankear_candidatos) queda sin cubrir por pruebas
 automatizadas hasta correrlo contra el CLI real — por eso HU-12/13/14 siguen
 en QA en el backlog.
 """
-
+import logging
 import asyncio
 import json
 import sys
@@ -385,3 +385,124 @@ def test_issue37_registra_observacion_con_error(caplog):
     assert registro["evento"] == "agent_step"
     assert registro["tipo"] == "observacion"
     assert registro["es_error"] is True
+
+
+    # ============================================================
+# Sprint 4 - Issue #36
+# Token usage and cost tracking for LLM calls
+# ============================================================
+
+from types import SimpleNamespace
+
+from src.agent import (
+    _extraer_metricas_llm,
+    _registrar_metricas_llm,
+)
+
+
+def test_issue36_extrae_tokens_y_costo():
+    """
+    Debe extraer usage y costo directamente del ResultMessage
+    reportado por Claude Agent SDK.
+    """
+
+    mensaje = SimpleNamespace(
+        usage={
+            "input_tokens": 1200,
+            "output_tokens": 350,
+        },
+        total_cost_usd=0.0125,
+        model_usage={},
+        num_turns=4,
+        duration_api_ms=1850,
+    )
+
+    metricas = _extraer_metricas_llm(mensaje)
+
+    assert metricas["usage"]["input_tokens"] == 1200
+    assert metricas["usage"]["output_tokens"] == 350
+    assert metricas["total_cost_usd"] == 0.0125
+    assert metricas["num_turns"] == 4
+    assert metricas["duration_api_ms"] == 1850
+
+
+def test_issue36_maneja_usage_vacio():
+    """
+    Si el SDK no devuelve usage o model_usage,
+    el tracking debe seguir funcionando.
+    """
+
+    mensaje = SimpleNamespace(
+        usage=None,
+        total_cost_usd=None,
+        model_usage=None,
+        num_turns=1,
+        duration_api_ms=500,
+    )
+
+    metricas = _extraer_metricas_llm(mensaje)
+
+    assert metricas["usage"] == {}
+    assert metricas["model_usage"] == {}
+    assert metricas["total_cost_usd"] is None
+    assert metricas["num_turns"] == 1
+
+
+def test_issue36_registra_metricas_como_json(caplog):
+    """
+    Las métricas deben quedar registradas como un evento
+    JSON estructurado llm_usage.
+    """
+
+    metricas = {
+        "usage": {
+            "input_tokens": 800,
+            "output_tokens": 200,
+        },
+        "total_cost_usd": 0.008,
+        "model_usage": {},
+        "num_turns": 3,
+        "duration_api_ms": 1200,
+    }
+
+    with caplog.at_level(logging.INFO, logger="agent"):
+        _registrar_metricas_llm(metricas)
+
+    registro = json.loads(
+        caplog.records[-1].message
+    )
+
+    assert registro["evento"] == "llm_usage"
+    assert registro["usage"]["input_tokens"] == 800
+    assert registro["usage"]["output_tokens"] == 200
+    assert registro["total_cost_usd"] == 0.008
+    assert registro["num_turns"] == 3
+    assert registro["duration_api_ms"] == 1200
+
+
+def test_issue36_resultado_agente_conserva_metricas():
+    """
+    ResultadoAgente debe exponer las métricas sin romper
+    la interfaz existente de ranking, pasos y error.
+    """
+
+    from src.agent import ResultadoAgente
+
+    metricas = {
+        "usage": {
+            "input_tokens": 100,
+            "output_tokens": 50,
+        },
+        "total_cost_usd": 0.001,
+    }
+
+    resultado = ResultadoAgente(
+        ranking=[],
+        pasos=[],
+        metricas=metricas,
+    )
+
+    assert resultado.ranking == []
+    assert resultado.pasos == []
+    assert resultado.error is None
+    assert resultado.metricas == metricas

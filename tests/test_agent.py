@@ -121,3 +121,156 @@ def test_tool_verificar_evidencia_reporta_error_en_candidato_inexistente():
     resultado = _correr(tool_verificar.handler({"email_id": "no_existe", "requisito": "Python"}))
 
     assert resultado.get("is_error") is True
+
+
+    # ============================================================
+# Sprint 4 - Issue #35
+# Retry/backoff strategy for failing agent tool calls
+# ============================================================
+
+import asyncio
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from src.agent import _ejecutar_con_reintentos
+
+
+def test_issue35_reintenta_y_se_recupera():
+    """
+    Si una tool falla temporalmente, debe reintentarse y
+    devolver el resultado cuando un intento posterior funciona.
+    """
+
+    intentos = 0
+
+    async def operacion_inestable():
+        nonlocal intentos
+        intentos += 1
+
+        if intentos < 3:
+            raise ConnectionError("Fallo temporal")
+
+        return {"resultado": "ok"}
+
+    async def ejecutar():
+        with patch(
+            "src.agent.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep:
+
+            resultado = await _ejecutar_con_reintentos(
+                operacion_inestable,
+                "tool_prueba",
+                max_intentos=3,
+                backoff_inicial=0.25,
+            )
+
+            return resultado, mock_sleep
+
+    resultado, mock_sleep = asyncio.run(ejecutar())
+
+    assert resultado == {"resultado": "ok"}
+    assert intentos == 3
+
+    assert mock_sleep.await_count == 2
+
+    mock_sleep.assert_any_await(0.25)
+    mock_sleep.assert_any_await(0.50)
+
+
+def test_issue35_no_reintenta_si_funciona_primera_vez():
+    """
+    Una tool que funciona correctamente no debe introducir
+    esperas ni reintentos innecesarios.
+    """
+
+    intentos = 0
+
+    async def operacion_correcta():
+        nonlocal intentos
+        intentos += 1
+        return "ok"
+
+    async def ejecutar():
+        with patch(
+            "src.agent.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep:
+
+            resultado = await _ejecutar_con_reintentos(
+                operacion_correcta,
+                "tool_prueba",
+            )
+
+            return resultado, mock_sleep
+
+    resultado, mock_sleep = asyncio.run(ejecutar())
+
+    assert resultado == "ok"
+    assert intentos == 1
+    mock_sleep.assert_not_awaited()
+
+
+def test_issue35_falla_despues_del_maximo_de_intentos():
+    """
+    Si la tool continúa fallando, el sistema debe detenerse
+    después del máximo configurado de intentos.
+    """
+
+    intentos = 0
+
+    async def operacion_fallida():
+        nonlocal intentos
+        intentos += 1
+        raise ConnectionError("Servicio no disponible")
+
+    async def ejecutar():
+        with patch(
+            "src.agent.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep:
+
+            with pytest.raises(
+                ConnectionError,
+                match="Servicio no disponible",
+            ):
+                await _ejecutar_con_reintentos(
+                    operacion_fallida,
+                    "tool_prueba",
+                    max_intentos=3,
+                    backoff_inicial=0.25,
+                )
+
+            return mock_sleep
+
+    mock_sleep = asyncio.run(ejecutar())
+
+    assert intentos == 3
+
+    # Hay espera después de los dos primeros fallos,
+    # pero no después del último.
+    assert mock_sleep.await_count == 2
+    mock_sleep.assert_any_await(0.25)
+    mock_sleep.assert_any_await(0.50)
+
+
+def test_issue35_valida_numero_de_intentos():
+    """
+    La configuración no debe permitir cero intentos.
+    """
+
+    async def operacion():
+        return "ok"
+
+    with pytest.raises(
+        ValueError,
+        match="max_intentos debe ser al menos 1",
+    ):
+        asyncio.run(
+            _ejecutar_con_reintentos(
+                operacion,
+                "tool_prueba",
+                max_intentos=0,
+            )
+        )

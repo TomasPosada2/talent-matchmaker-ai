@@ -201,3 +201,106 @@ def test_hu16_no_inventa_nombre_sin_candidato_valido():
 
     assert nombre is None
     assert evidencia is None
+
+
+    # ============================================================
+# Sprint 4 - HU-15
+# OCR support for scanned image CVs
+# ============================================================
+
+from unittest.mock import patch
+
+from src.text_extractor import extraer_texto
+
+
+def test_hu15_pdf_sin_texto_activa_ocr(tmp_path):
+    """
+    Un PDF sin capa de texto debe activar automáticamente
+    el mecanismo OCR.
+    """
+    archivo = tmp_path / "cv_escaneado.pdf"
+    archivo.write_bytes(b"%PDF-1.4 fake pdf for test")
+
+    with patch(
+        "src.text_extractor._extraer_pdf",
+        return_value=[],
+    ), patch(
+        "src.text_extractor._extraer_pdf_con_ocr",
+        return_value=[
+            "Juan Pérez",
+            "Software Engineer",
+            "juan@email.com",
+        ],
+    ) as mock_ocr:
+
+        resultado = extraer_texto(
+            "email-hu15",
+            archivo,
+        )
+
+    mock_ocr.assert_called_once_with(archivo)
+
+    assert resultado.procesable is True
+    assert "Juan Pérez" in resultado.texto_completo
+    assert resultado.lineas[0] == "Juan Pérez"
+
+
+def test_hu15_pdf_con_texto_no_activa_ocr(tmp_path):
+    """
+    Un PDF que ya contiene texto debe continuar utilizando
+    la extracción normal y no ejecutar OCR innecesariamente.
+    """
+    archivo = tmp_path / "cv_normal.pdf"
+    archivo.write_bytes(b"%PDF-1.4 fake pdf for test")
+
+    with patch(
+        "src.text_extractor._extraer_pdf",
+        return_value=[
+            "María López",
+            "Data Analyst",
+        ],
+    ), patch(
+        "src.text_extractor._extraer_pdf_con_ocr",
+    ) as mock_ocr:
+
+        resultado = extraer_texto(
+            "email-hu15-normal",
+            archivo,
+        )
+
+    mock_ocr.assert_not_called()
+
+    assert resultado.procesable is True
+    assert resultado.lineas == [
+        "María López",
+        "Data Analyst",
+    ]
+
+
+def test_hu15_error_ocr_se_maneja_sin_crash(tmp_path):
+    """
+    Si el motor OCR falla, el pipeline debe devolver un
+    resultado controlado en lugar de lanzar una excepción.
+    """
+    archivo = tmp_path / "cv_ocr_error.pdf"
+    archivo.write_bytes(b"%PDF-1.4 fake pdf for test")
+
+    with patch(
+        "src.text_extractor._extraer_pdf",
+        return_value=[],
+    ), patch(
+        "src.text_extractor._extraer_pdf_con_ocr",
+        side_effect=RuntimeError(
+            "Tesseract no disponible"
+        ),
+    ):
+
+        resultado = extraer_texto(
+            "email-hu15-error",
+            archivo,
+        )
+
+    assert resultado.procesable is False
+    assert resultado.texto_completo == ""
+    assert resultado.lineas == []
+    assert "OCR" in resultado.motivo

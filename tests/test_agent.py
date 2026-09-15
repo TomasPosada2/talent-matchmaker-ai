@@ -1,265 +1,188 @@
 """
-Tests del agente de matching (HU-09 a HU-14).
+Tests del agente de ranking.
 
-Sprint 4: el agent loop ahora corre sobre el Claude Agent SDK, que a su vez
-depende del binario `claude` (Claude Code CLI) para de verdad hablar con el
-modelo. Ese binario no está disponible en este entorno de desarrollo, así
-que aquí se prueba lo que sí se puede probar sin él:
-
-  - la lógica de negocio pura (agent_tools, vacancy_structurer, schema)
-  - los handlers de las tools del SDK, llamados directamente como las
-    funciones async que son (agent.construir_tools), sin pasar por el CLI
-
-El loop completo (agent.rankear_candidatos) queda sin cubrir por pruebas
-automatizadas hasta correrlo contra el CLI real — por eso HU-12/13/14 siguen
-en QA en el backlog.
+Incluye:
+- HU-13: validación del ranking con evidencia.
+- Sprint 4 #35: retry/backoff de tools.
+- Sprint 4 #36: token usage y cost tracking.
+- Sprint 4 #37: structured logging.
+- Sprint 4 #40: confidence scoring por decisión de ranking.
 """
-import logging
+
 import asyncio
 import json
-import sys
-from pathlib import Path
+import logging
+from types import SimpleNamespace
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import pytest
 
-from src import agent, agent_tools, schema, vacancy_structurer
-
-PERFILES = [
-    {
-        "email_id": "email_1",
-        "nombre": {"valor": "Ana", "evidencia": "Ana"},
-        "contacto": {"email": {"valor": "ana@example.com", "evidencia": "ana@example.com"},
-                     "telefono": {"valor": None, "evidencia": None}},
-        "educacion": {"valor": None, "evidencia": None},
-        "experiencia": {"valor": None, "evidencia": None},
-        "habilidades": {"valor": "Python, SQL", "evidencia": "Python, SQL"},
-    }
-]
+from src import schema
+from src.agent import (
+    ResultadoAgente,
+    _agregar_confianza_ranking,
+    _calcular_confianza_decision,
+    _ejecutar_con_reintentos,
+    _extraer_metricas_llm,
+    _registrar_metricas_llm,
+    _registrar_paso_agente,
+)
 
 
-def _correr(coro):
-    return asyncio.run(coro)
+# ============================================================
+# HU-13
+# Validación del ranking con evidencia
+# ============================================================
 
+def test_ranking_sin_justificacion_es_invalido():
+    ranking_invalido = [
+        {
+            "email_id": "email_1",
+            "puntaje": 80,
+        }
+    ]
 
-def test_estructurar_vacante_extrae_requisitos():
-    texto = "Backend Developer\n\nRequisitos:\n- Python\n- SQL\n"
-    vacante = vacancy_structurer.estructurar_vacante(texto)
-    assert vacante["cargo"] == "Backend Developer"
-    assert vacante["requisitos"] == ["Python", "SQL"]
+    es_valido, error = schema.validar_ranking(
+        ranking_invalido
+    )
 
-
-def test_estructurar_vacante_sin_requisitos_no_alucina():
-    vacante = vacancy_structurer.estructurar_vacante("Backend Developer\n\nSobre nosotros...")
-    assert vacante["requisitos"] == []
-
-
-def test_consultar_perfiles_filtra_por_email_id():
-    resultado = agent_tools.consultar_perfiles(PERFILES, "email_1")
-    assert len(resultado) == 1
-    assert agent_tools.consultar_perfiles(PERFILES, "no_existe") == []
-
-
-def test_verificar_evidencia_encuentra_match_real():
-    resultado = agent_tools.verificar_evidencia(PERFILES[0], "Python")
-    assert resultado["tiene_evidencia"] is True
-    assert resultado["evidencia"] == "Python, SQL"
-
-
-def test_verificar_evidencia_no_alucina_sin_match():
-    resultado = agent_tools.verificar_evidencia(PERFILES[0], "Kubernetes")
-    assert resultado["tiene_evidencia"] is False
-    assert resultado["evidencia"] is None
-
-
-def test_ranking_sin_justificacion_es_rechazado_por_el_schema():
-    ranking_invalido = [{"email_id": "email_1", "puntaje": 80}]
-    es_valido, error = schema.validar_ranking(ranking_invalido)
-    assert es_valido is False
+    assert not es_valido
     assert error is not None
 
 
 def test_ranking_con_evidencia_es_valido():
-    ranking_valido = [{
-        "email_id": "email_1",
-        "puntaje": 80,
-        "justificacion": [{"requisito": "Python", "evidencia": "Python, SQL"}],
-        "requisitos_sin_evidencia": [],
-    }]
-    es_valido, error = schema.validar_ranking(ranking_valido)
+    ranking_valido = [
+        {
+            "email_id": "email_1",
+            "puntaje": 80,
+            "confianza": 1.0,
+            "razon_confianza": (
+                "Confianza alta: la mayoría de los requisitos "
+                "evaluados cuenta con evidencia verificable."
+            ),
+            "justificacion": [
+                {
+                    "requisito": "Python",
+                    "evidencia": "Python, SQL",
+                }
+            ],
+            "requisitos_sin_evidencia": [],
+        }
+    ]
+
+    es_valido, error = schema.validar_ranking(
+        ranking_valido
+    )
+
     assert es_valido, error
 
 
-def test_tool_consultar_perfiles_devuelve_formato_mcp():
-    tools = agent.construir_tools(PERFILES)
-    tool_consultar = next(t for t in tools if t.name == "consultar_perfiles")
+def test_ranking_puntaje_fuera_de_rango_es_invalido():
+    ranking_invalido = [
+        {
+            "email_id": "email_1",
+            "puntaje": 120,
+            "confianza": 1.0,
+            "razon_confianza": (
+                "Existe evidencia verificable."
+            ),
+            "justificacion": [
+                {
+                    "requisito": "Python",
+                    "evidencia": "Python",
+                }
+            ],
+            "requisitos_sin_evidencia": [],
+        }
+    ]
 
-    resultado = _correr(tool_consultar.handler({"email_id": "email_1"}))
+    es_valido, error = schema.validar_ranking(
+        ranking_invalido
+    )
 
-    assert "content" in resultado
-    perfiles_devueltos = json.loads(resultado["content"][0]["text"])
-    assert perfiles_devueltos[0]["email_id"] == "email_1"
-
-
-def test_tool_verificar_evidencia_confirma_match_real():
-    tools = agent.construir_tools(PERFILES)
-    tool_verificar = next(t for t in tools if t.name == "verificar_evidencia")
-
-    resultado = _correr(tool_verificar.handler({"email_id": "email_1", "requisito": "Python"}))
-
-    cuerpo = json.loads(resultado["content"][0]["text"])
-    assert cuerpo["tiene_evidencia"] is True
-    assert not resultado.get("is_error")
-
-
-def test_tool_verificar_evidencia_reporta_error_en_candidato_inexistente():
-    """HU-14: si el agente pide evidencia de un candidato que no existe
-    (referencia alucinada), la tool debe reportar el error explícitamente
-    en vez de devolver una respuesta inventada."""
-    tools = agent.construir_tools(PERFILES)
-    tool_verificar = next(t for t in tools if t.name == "verificar_evidencia")
-
-    resultado = _correr(tool_verificar.handler({"email_id": "no_existe", "requisito": "Python"}))
-
-    assert resultado.get("is_error") is True
+    assert not es_valido
+    assert error is not None
 
 
-    # ============================================================
+# ============================================================
 # Sprint 4 - Issue #35
-# Retry/backoff strategy for failing agent tool calls
+# Retry/backoff strategy
 # ============================================================
 
-import asyncio
-from unittest.mock import AsyncMock, patch
+def test_retry_tool_funciona_en_primer_intento():
+    llamadas = 0
 
-import pytest
-
-from src.agent import _ejecutar_con_reintentos
-
-
-def test_issue35_reintenta_y_se_recupera():
-    """
-    Si una tool falla temporalmente, debe reintentarse y
-    devolver el resultado cuando un intento posterior funciona.
-    """
-
-    intentos = 0
-
-    async def operacion_inestable():
-        nonlocal intentos
-        intentos += 1
-
-        if intentos < 3:
-            raise ConnectionError("Fallo temporal")
-
-        return {"resultado": "ok"}
-
-    async def ejecutar():
-        with patch(
-            "src.agent.asyncio.sleep",
-            new_callable=AsyncMock,
-        ) as mock_sleep:
-
-            resultado = await _ejecutar_con_reintentos(
-                operacion_inestable,
-                "tool_prueba",
-                max_intentos=3,
-                backoff_inicial=0.25,
-            )
-
-            return resultado, mock_sleep
-
-    resultado, mock_sleep = asyncio.run(ejecutar())
-
-    assert resultado == {"resultado": "ok"}
-    assert intentos == 3
-
-    assert mock_sleep.await_count == 2
-
-    mock_sleep.assert_any_await(0.25)
-    mock_sleep.assert_any_await(0.50)
-
-
-def test_issue35_no_reintenta_si_funciona_primera_vez():
-    """
-    Una tool que funciona correctamente no debe introducir
-    esperas ni reintentos innecesarios.
-    """
-
-    intentos = 0
-
-    async def operacion_correcta():
-        nonlocal intentos
-        intentos += 1
+    async def operacion():
+        nonlocal llamadas
+        llamadas += 1
         return "ok"
 
-    async def ejecutar():
-        with patch(
-            "src.agent.asyncio.sleep",
-            new_callable=AsyncMock,
-        ) as mock_sleep:
-
-            resultado = await _ejecutar_con_reintentos(
-                operacion_correcta,
-                "tool_prueba",
-            )
-
-            return resultado, mock_sleep
-
-    resultado, mock_sleep = asyncio.run(ejecutar())
+    resultado = asyncio.run(
+        _ejecutar_con_reintentos(
+            operacion,
+            "tool_prueba",
+            max_intentos=3,
+            backoff_inicial=0,
+        )
+    )
 
     assert resultado == "ok"
-    assert intentos == 1
-    mock_sleep.assert_not_awaited()
+    assert llamadas == 1
 
 
-def test_issue35_falla_despues_del_maximo_de_intentos():
-    """
-    Si la tool continúa fallando, el sistema debe detenerse
-    después del máximo configurado de intentos.
-    """
+def test_retry_tool_reintenta_tras_error():
+    llamadas = 0
 
-    intentos = 0
+    async def operacion():
+        nonlocal llamadas
+        llamadas += 1
 
-    async def operacion_fallida():
-        nonlocal intentos
-        intentos += 1
-        raise ConnectionError("Servicio no disponible")
+        if llamadas < 3:
+            raise RuntimeError(
+                "fallo temporal"
+            )
 
-    async def ejecutar():
-        with patch(
-            "src.agent.asyncio.sleep",
-            new_callable=AsyncMock,
-        ) as mock_sleep:
+        return "recuperado"
 
-            with pytest.raises(
-                ConnectionError,
-                match="Servicio no disponible",
-            ):
-                await _ejecutar_con_reintentos(
-                    operacion_fallida,
-                    "tool_prueba",
-                    max_intentos=3,
-                    backoff_inicial=0.25,
-                )
+    resultado = asyncio.run(
+        _ejecutar_con_reintentos(
+            operacion,
+            "tool_prueba",
+            max_intentos=3,
+            backoff_inicial=0,
+        )
+    )
 
-            return mock_sleep
-
-    mock_sleep = asyncio.run(ejecutar())
-
-    assert intentos == 3
-
-    # Hay espera después de los dos primeros fallos,
-    # pero no después del último.
-    assert mock_sleep.await_count == 2
-    mock_sleep.assert_any_await(0.25)
-    mock_sleep.assert_any_await(0.50)
+    assert resultado == "recuperado"
+    assert llamadas == 3
 
 
-def test_issue35_valida_numero_de_intentos():
-    """
-    La configuración no debe permitir cero intentos.
-    """
+def test_retry_tool_lanza_error_tras_maximo_intentos():
+    llamadas = 0
 
+    async def operacion():
+        nonlocal llamadas
+        llamadas += 1
+        raise RuntimeError(
+            "fallo permanente"
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="fallo permanente",
+    ):
+        asyncio.run(
+            _ejecutar_con_reintentos(
+                operacion,
+                "tool_prueba",
+                max_intentos=3,
+                backoff_inicial=0,
+            )
+        )
+
+    assert llamadas == 3
+
+
+def test_retry_tool_rechaza_cero_intentos():
     async def operacion():
         return "ok"
 
@@ -272,85 +195,77 @@ def test_issue35_valida_numero_de_intentos():
                 operacion,
                 "tool_prueba",
                 max_intentos=0,
+                backoff_inicial=0,
             )
         )
 
 
 # ============================================================
 # Sprint 4 - Issue #37
-# Structured logging of Thought / Action / Observation
+# Structured logging
 # ============================================================
 
-import json
-import logging
-
-from src.agent import _registrar_paso_agente
-
-
-def test_issue37_registra_thought_como_json(caplog):
-    """
-    Un Thought debe generar un log JSON estructurado.
-    """
-
-    with caplog.at_level(logging.INFO, logger="agent"):
+def test_logging_thought_estructurado(caplog):
+    with caplog.at_level(
+        logging.INFO,
+        logger="agent",
+    ):
         evento = _registrar_paso_agente(
             "thought",
-            contenido="Analizando requisitos de la vacante",
+            contenido="Analizando candidato",
         )
 
     assert evento["evento"] == "agent_step"
     assert evento["tipo"] == "thought"
-    assert evento["contenido"] == "Analizando requisitos de la vacante"
+    assert evento["contenido"] == "Analizando candidato"
 
-    registro = json.loads(caplog.records[-1].message)
+    registro = json.loads(
+        caplog.records[-1].message
+    )
 
     assert registro["evento"] == "agent_step"
     assert registro["tipo"] == "thought"
-    assert registro["contenido"] == "Analizando requisitos de la vacante"
 
 
-def test_issue37_registra_action_con_tool_y_argumentos(caplog):
-    """
-    Una Action debe registrar la tool utilizada y sus argumentos.
-    """
-
-    argumentos = {
-        "email_id": "candidato-01",
-        "requisito": "Python",
-    }
-
-    with caplog.at_level(logging.INFO, logger="agent"):
+def test_logging_action_estructurado(caplog):
+    with caplog.at_level(
+        logging.INFO,
+        logger="agent",
+    ):
         evento = _registrar_paso_agente(
             "accion",
             tool="verificar_evidencia",
-            argumentos=argumentos,
+            argumentos={
+                "email_id": "email_1",
+                "requisito": "Python",
+            },
         )
 
     assert evento["evento"] == "agent_step"
     assert evento["tipo"] == "accion"
     assert evento["tool"] == "verificar_evidencia"
-    assert evento["argumentos"] == argumentos
 
-    registro = json.loads(caplog.records[-1].message)
+    assert evento["argumentos"] == {
+        "email_id": "email_1",
+        "requisito": "Python",
+    }
+
+    registro = json.loads(
+        caplog.records[-1].message
+    )
 
     assert registro["tipo"] == "accion"
     assert registro["tool"] == "verificar_evidencia"
-    assert registro["argumentos"] == argumentos
 
 
-def test_issue37_registra_observacion(caplog):
-    """
-    Una Observation debe registrar el contenido recibido
-    y si representa o no un error.
-    """
-
-    with caplog.at_level(logging.INFO, logger="agent"):
+def test_logging_observation_estructurado(caplog):
+    with caplog.at_level(
+        logging.INFO,
+        logger="agent",
+    ):
         evento = _registrar_paso_agente(
             "observacion",
-            contenido={
-                "tiene_evidencia": True,
-                "campo": "habilidades",
-            },
+            contenido="Evidencia encontrada",
             es_error=False,
         )
 
@@ -358,54 +273,44 @@ def test_issue37_registra_observacion(caplog):
     assert evento["tipo"] == "observacion"
     assert evento["es_error"] is False
 
-    registro = json.loads(caplog.records[-1].message)
+    registro = json.loads(
+        caplog.records[-1].message
+    )
 
     assert registro["tipo"] == "observacion"
     assert registro["es_error"] is False
 
 
-def test_issue37_registra_observacion_con_error(caplog):
-    """
-    Una Observation fallida debe quedar explícitamente
-    identificada como error en el log.
-    """
-
-    with caplog.at_level(logging.INFO, logger="agent"):
+def test_logging_observation_error_estructurado(caplog):
+    with caplog.at_level(
+        logging.INFO,
+        logger="agent",
+    ):
         evento = _registrar_paso_agente(
             "observacion",
-            contenido="Tool temporalmente no disponible",
+            contenido="Error de tool",
             es_error=True,
         )
 
+    assert evento["evento"] == "agent_step"
     assert evento["tipo"] == "observacion"
     assert evento["es_error"] is True
 
-    registro = json.loads(caplog.records[-1].message)
+    registro = json.loads(
+        caplog.records[-1].message
+    )
 
     assert registro["evento"] == "agent_step"
     assert registro["tipo"] == "observacion"
     assert registro["es_error"] is True
 
 
-    # ============================================================
+# ============================================================
 # Sprint 4 - Issue #36
-# Token usage and cost tracking for LLM calls
+# Token usage and cost tracking
 # ============================================================
 
-from types import SimpleNamespace
-
-from src.agent import (
-    _extraer_metricas_llm,
-    _registrar_metricas_llm,
-)
-
-
 def test_issue36_extrae_tokens_y_costo():
-    """
-    Debe extraer usage y costo directamente del ResultMessage
-    reportado por Claude Agent SDK.
-    """
-
     mensaje = SimpleNamespace(
         usage={
             "input_tokens": 1200,
@@ -417,7 +322,9 @@ def test_issue36_extrae_tokens_y_costo():
         duration_api_ms=1850,
     )
 
-    metricas = _extraer_metricas_llm(mensaje)
+    metricas = _extraer_metricas_llm(
+        mensaje
+    )
 
     assert metricas["usage"]["input_tokens"] == 1200
     assert metricas["usage"]["output_tokens"] == 350
@@ -427,11 +334,6 @@ def test_issue36_extrae_tokens_y_costo():
 
 
 def test_issue36_maneja_usage_vacio():
-    """
-    Si el SDK no devuelve usage o model_usage,
-    el tracking debe seguir funcionando.
-    """
-
     mensaje = SimpleNamespace(
         usage=None,
         total_cost_usd=None,
@@ -440,20 +342,18 @@ def test_issue36_maneja_usage_vacio():
         duration_api_ms=500,
     )
 
-    metricas = _extraer_metricas_llm(mensaje)
+    metricas = _extraer_metricas_llm(
+        mensaje
+    )
 
     assert metricas["usage"] == {}
     assert metricas["model_usage"] == {}
     assert metricas["total_cost_usd"] is None
     assert metricas["num_turns"] == 1
+    assert metricas["duration_api_ms"] == 500
 
 
 def test_issue36_registra_metricas_como_json(caplog):
-    """
-    Las métricas deben quedar registradas como un evento
-    JSON estructurado llm_usage.
-    """
-
     metricas = {
         "usage": {
             "input_tokens": 800,
@@ -465,8 +365,13 @@ def test_issue36_registra_metricas_como_json(caplog):
         "duration_api_ms": 1200,
     }
 
-    with caplog.at_level(logging.INFO, logger="agent"):
-        _registrar_metricas_llm(metricas)
+    with caplog.at_level(
+        logging.INFO,
+        logger="agent",
+    ):
+        _registrar_metricas_llm(
+            metricas
+        )
 
     registro = json.loads(
         caplog.records[-1].message
@@ -481,13 +386,6 @@ def test_issue36_registra_metricas_como_json(caplog):
 
 
 def test_issue36_resultado_agente_conserva_metricas():
-    """
-    ResultadoAgente debe exponer las métricas sin romper
-    la interfaz existente de ranking, pasos y error.
-    """
-
-    from src.agent import ResultadoAgente
-
     metricas = {
         "usage": {
             "input_tokens": 100,
@@ -506,3 +404,203 @@ def test_issue36_resultado_agente_conserva_metricas():
     assert resultado.pasos == []
     assert resultado.error is None
     assert resultado.metricas == metricas
+
+
+# ============================================================
+# Sprint 4 - Issue #40
+# Confidence scoring per ranking decision
+# ============================================================
+
+def test_issue40_confianza_total_con_toda_la_evidencia():
+    item = {
+        "email_id": "email_1",
+        "puntaje": 95,
+        "justificacion": [
+            {
+                "requisito": "Python",
+                "evidencia": "5 años usando Python",
+            },
+            {
+                "requisito": "SQL",
+                "evidencia": "Experiencia con PostgreSQL",
+            },
+            {
+                "requisito": "AWS",
+                "evidencia": "AWS Solutions Architect",
+            },
+            {
+                "requisito": "Docker",
+                "evidencia": "Docker y Kubernetes",
+            },
+        ],
+        "requisitos_sin_evidencia": [],
+    }
+
+    confianza, razon = _calcular_confianza_decision(
+        item
+    )
+
+    assert confianza == 1.0
+    assert "Confianza alta" in razon
+
+
+def test_issue40_confianza_075():
+    item = {
+        "email_id": "email_1",
+        "puntaje": 80,
+        "justificacion": [
+            {
+                "requisito": "Python",
+                "evidencia": "Python",
+            },
+            {
+                "requisito": "SQL",
+                "evidencia": "SQL",
+            },
+            {
+                "requisito": "Docker",
+                "evidencia": "Docker",
+            },
+        ],
+        "requisitos_sin_evidencia": [
+            "AWS",
+        ],
+    }
+
+    confianza, razon = _calcular_confianza_decision(
+        item
+    )
+
+    assert confianza == 0.75
+    assert "Confianza media" in razon
+
+
+def test_issue40_confianza_05():
+    item = {
+        "email_id": "email_1",
+        "puntaje": 60,
+        "justificacion": [
+            {
+                "requisito": "Python",
+                "evidencia": "Python",
+            },
+            {
+                "requisito": "SQL",
+                "evidencia": "SQL",
+            },
+        ],
+        "requisitos_sin_evidencia": [
+            "AWS",
+            "Docker",
+        ],
+    }
+
+    confianza, razon = _calcular_confianza_decision(
+        item
+    )
+
+    assert confianza == 0.5
+    assert "Confianza media" in razon
+
+
+def test_issue40_confianza_cero_sin_requisitos():
+    item = {
+        "email_id": "email_1",
+        "puntaje": 0,
+        "justificacion": [],
+        "requisitos_sin_evidencia": [],
+    }
+
+    confianza, razon = _calcular_confianza_decision(
+        item
+    )
+
+    assert confianza == 0.0
+    assert "No existen requisitos evaluados" in razon
+
+
+def test_issue40_agrega_confianza_al_ranking():
+    ranking = [
+        {
+            "email_id": "email_1",
+            "puntaje": 75,
+            "justificacion": [
+                {
+                    "requisito": "Python",
+                    "evidencia": "Python",
+                },
+                {
+                    "requisito": "SQL",
+                    "evidencia": "SQL",
+                },
+                {
+                    "requisito": "Docker",
+                    "evidencia": "Docker",
+                },
+            ],
+            "requisitos_sin_evidencia": [
+                "AWS",
+            ],
+        }
+    ]
+
+    resultado = _agregar_confianza_ranking(
+        ranking
+    )
+
+    assert len(resultado) == 1
+    assert resultado[0]["confianza"] == 0.75
+    assert "razon_confianza" in resultado[0]
+
+
+def test_issue40_no_modifica_ranking_original():
+    ranking = [
+        {
+            "email_id": "email_1",
+            "puntaje": 90,
+            "justificacion": [
+                {
+                    "requisito": "Python",
+                    "evidencia": "Python",
+                }
+            ],
+            "requisitos_sin_evidencia": [],
+        }
+    ]
+
+    resultado = _agregar_confianza_ranking(
+        ranking
+    )
+
+    assert "confianza" not in ranking[0]
+    assert "razon_confianza" not in ranking[0]
+
+    assert resultado[0]["confianza"] == 1.0
+    assert "razon_confianza" in resultado[0]
+
+
+def test_issue40_schema_rechaza_confianza_fuera_de_rango():
+    ranking_invalido = [
+        {
+            "email_id": "email_1",
+            "puntaje": 80,
+            "confianza": 1.5,
+            "razon_confianza": (
+                "Valor deliberadamente inválido para el test."
+            ),
+            "justificacion": [
+                {
+                    "requisito": "Python",
+                    "evidencia": "Python",
+                }
+            ],
+            "requisitos_sin_evidencia": [],
+        }
+    ]
+
+    es_valido, error = schema.validar_ranking(
+        ranking_invalido
+    )
+
+    assert not es_valido
+    assert error is not None

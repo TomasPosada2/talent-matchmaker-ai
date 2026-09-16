@@ -96,3 +96,211 @@ def test_perfil_invalido_es_rechazado():
     es_valido, error = schema.validar_perfil(perfil_malformado)
     assert es_valido is False
     assert error is not None
+
+
+# ============================================================
+# Sprint 4 - HU-16
+# More robust name heuristic for atypical CV templates
+# ============================================================
+
+from src.profile_structurer import _extraer_nombre
+
+
+def test_hu16_nombre_despues_de_titulo_cv():
+    """
+    El nombre puede aparecer después de un título genérico del documento.
+    """
+    lineas = [
+        "CURRICULUM VITAE",
+        "",
+        "Juan Carlos Pérez Gómez",
+        "juan.perez@email.com",
+        "+57 300 123 4567",
+    ]
+
+    nombre, evidencia = _extraer_nombre(lineas)
+
+    assert nombre == "Juan Carlos Pérez Gómez"
+    assert evidencia == "Juan Carlos Pérez Gómez"
+
+
+def test_hu16_nombre_despues_de_datos_contacto():
+    """
+    El nombre puede aparecer después de información de contacto.
+    """
+    lineas = [
+        "HOJA DE VIDA",
+        "Email: maria@email.com",
+        "Teléfono: +57 301 555 5555",
+        "",
+        "María Fernanda López",
+        "Experiencia",
+    ]
+
+    nombre, evidencia = _extraer_nombre(lineas)
+
+    assert nombre == "María Fernanda López"
+    assert evidencia == "María Fernanda López"
+
+
+def test_hu16_descarta_urls_antes_del_nombre():
+    """
+    Una URL ubicada antes del nombre no debe ser interpretada
+    como nombre del candidato.
+    """
+    lineas = [
+        "RESUME",
+        "https://www.linkedin.com/in/candidato",
+        "www.portfolio.com",
+        "",
+        "Carlos Andrés Ramírez",
+        "Skills",
+    ]
+
+    nombre, evidencia = _extraer_nombre(lineas)
+
+    assert nombre == "Carlos Andrés Ramírez"
+    assert evidencia == "Carlos Andrés Ramírez"
+
+
+def test_hu16_nombre_fuera_de_primeras_tres_lineas():
+    """
+    La heurística debe encontrar nombres que aparecen después
+    de las primeras tres líneas del CV.
+    """
+    lineas = [
+        "CURRICULUM VITAE",
+        "",
+        "email: ana@email.com",
+        "+57 310 555 1234",
+        "",
+        "Ana Sofía Martínez",
+        "Educación",
+    ]
+
+    nombre, evidencia = _extraer_nombre(lineas)
+
+    assert nombre == "Ana Sofía Martínez"
+    assert evidencia == "Ana Sofía Martínez"
+
+
+def test_hu16_no_inventa_nombre_sin_candidato_valido():
+    """
+    Si no existe evidencia suficiente para identificar un nombre,
+    la función debe mantener el principio anti-alucinación.
+    """
+    lineas = [
+        "CURRICULUM VITAE",
+        "email: candidato@email.com",
+        "+57 300 123 4567",
+        "https://www.linkedin.com/in/candidato",
+        "Experiencia",
+    ]
+
+    nombre, evidencia = _extraer_nombre(lineas)
+
+    assert nombre is None
+    assert evidencia is None
+
+
+    # ============================================================
+# Sprint 4 - HU-15
+# OCR support for scanned image CVs
+# ============================================================
+
+from unittest.mock import patch
+
+from src.text_extractor import extraer_texto
+
+
+def test_hu15_pdf_sin_texto_activa_ocr(tmp_path):
+    """
+    Un PDF sin capa de texto debe activar automáticamente
+    el mecanismo OCR.
+    """
+    archivo = tmp_path / "cv_escaneado.pdf"
+    archivo.write_bytes(b"%PDF-1.4 fake pdf for test")
+
+    with patch(
+        "src.text_extractor._extraer_pdf",
+        return_value=[],
+    ), patch(
+        "src.text_extractor._extraer_pdf_con_ocr",
+        return_value=[
+            "Juan Pérez",
+            "Software Engineer",
+            "juan@email.com",
+        ],
+    ) as mock_ocr:
+
+        resultado = extraer_texto(
+            "email-hu15",
+            archivo,
+        )
+
+    mock_ocr.assert_called_once_with(archivo)
+
+    assert resultado.procesable is True
+    assert "Juan Pérez" in resultado.texto_completo
+    assert resultado.lineas[0] == "Juan Pérez"
+
+
+def test_hu15_pdf_con_texto_no_activa_ocr(tmp_path):
+    """
+    Un PDF que ya contiene texto debe continuar utilizando
+    la extracción normal y no ejecutar OCR innecesariamente.
+    """
+    archivo = tmp_path / "cv_normal.pdf"
+    archivo.write_bytes(b"%PDF-1.4 fake pdf for test")
+
+    with patch(
+        "src.text_extractor._extraer_pdf",
+        return_value=[
+            "María López",
+            "Data Analyst",
+        ],
+    ), patch(
+        "src.text_extractor._extraer_pdf_con_ocr",
+    ) as mock_ocr:
+
+        resultado = extraer_texto(
+            "email-hu15-normal",
+            archivo,
+        )
+
+    mock_ocr.assert_not_called()
+
+    assert resultado.procesable is True
+    assert resultado.lineas == [
+        "María López",
+        "Data Analyst",
+    ]
+
+
+def test_hu15_error_ocr_se_maneja_sin_crash(tmp_path):
+    """
+    Si el motor OCR falla, el pipeline debe devolver un
+    resultado controlado en lugar de lanzar una excepción.
+    """
+    archivo = tmp_path / "cv_ocr_error.pdf"
+    archivo.write_bytes(b"%PDF-1.4 fake pdf for test")
+
+    with patch(
+        "src.text_extractor._extraer_pdf",
+        return_value=[],
+    ), patch(
+        "src.text_extractor._extraer_pdf_con_ocr",
+        side_effect=RuntimeError(
+            "Tesseract no disponible"
+        ),
+    ):
+
+        resultado = extraer_texto(
+            "email-hu15-error",
+            archivo,
+        )
+
+    assert resultado.procesable is False
+    assert resultado.texto_completo == ""
+    assert resultado.lineas == []
+    assert "OCR" in resultado.motivo

@@ -5,3 +5,8 @@ Faker>=25.0.0
 pytest>=8.0.0
 streamlit>=1.35.0
 claude-agent-sdk>=0.2.0
+
+pymupdf
+pytesseract
+pillow
+reportlab>=4.0.0

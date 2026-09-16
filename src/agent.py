@@ -9,6 +9,7 @@ Sprint 4:
 - #37: Structured logging of agent Thought/Action/Observation steps.
 - #39: Safeguards against prompt injection from CV content.
 - #40: Confidence scoring per ranking decision.
+- #41: Support multiple job descriptions in one run.
 """
 
 import asyncio
@@ -655,6 +656,10 @@ async def rankear_candidatos_async(
             options=opciones,
         ):
 
+            # ------------------------------------------------
+            # THOUGHT / ACTION
+            # ------------------------------------------------
+
             if isinstance(
                 mensaje,
                 AssistantMessage,
@@ -693,6 +698,10 @@ async def rankear_candidatos_async(
                             evento
                         )
 
+            # ------------------------------------------------
+            # OBSERVATION
+            # ------------------------------------------------
+
             elif (
                 isinstance(
                     mensaje,
@@ -722,6 +731,10 @@ async def rankear_candidatos_async(
                         pasos.append(
                             evento
                         )
+
+            # ------------------------------------------------
+            # RESULTADO FINAL + ISSUE #36
+            # ------------------------------------------------
 
             elif isinstance(
                 mensaje,
@@ -859,7 +872,7 @@ async def rankear_candidatos_async(
 
 
 # ============================================================
-# Wrapper síncrono
+# Wrapper síncrono para una vacante
 # ============================================================
 
 def rankear_candidatos(
@@ -876,3 +889,133 @@ def rankear_candidatos(
             perfiles,
         )
     )
+
+
+# ============================================================
+# Sprint 4 - Issue #41
+# Support multiple job descriptions in one run
+# ============================================================
+
+def rankear_multiples_vacantes(
+    vacantes: list[dict],
+    perfiles: list[dict],
+) -> dict:
+    """
+    Ejecuta el ranking de los mismos candidatos contra
+    múltiples descripciones de vacante en una sola corrida.
+
+    Cada vacante se procesa de manera independiente.
+
+    Si una vacante falla:
+    - se registra su error;
+    - su ranking queda en None;
+    - las demás vacantes continúan procesándose.
+
+    Retorna un resumen general de toda la corrida.
+    """
+
+    resultados = []
+
+    for indice, vacante in enumerate(
+        vacantes,
+        start=1,
+    ):
+        # ----------------------------------------------------
+        # Identificador de la vacante
+        # ----------------------------------------------------
+
+        vacante_id = (
+            vacante.get("vacante_id")
+            or vacante.get("id")
+            or f"vacante_{indice}"
+        )
+
+        # ----------------------------------------------------
+        # Título legible
+        # ----------------------------------------------------
+
+        titulo = (
+            vacante.get("titulo")
+            or vacante.get("nombre")
+            or vacante_id
+        )
+
+        logger.info(
+            "Procesando vacante %d/%d: %s",
+            indice,
+            len(vacantes),
+            vacante_id,
+        )
+
+        try:
+            resultado = rankear_candidatos(
+                vacante,
+                perfiles,
+            )
+
+            resultados.append(
+                {
+                    "vacante_id": vacante_id,
+                    "titulo": titulo,
+                    "ranking": resultado.ranking,
+                    "error": resultado.error,
+                    "metricas": resultado.metricas,
+                }
+            )
+
+        except Exception as error:
+            # Protección adicional:
+            # una excepción inesperada en una vacante
+            # no debe detener el lote completo.
+
+            logger.error(
+                "Error procesando vacante '%s': %s",
+                vacante_id,
+                error,
+            )
+
+            resultados.append(
+                {
+                    "vacante_id": vacante_id,
+                    "titulo": titulo,
+                    "ranking": None,
+                    "error": str(
+                        error
+                    ),
+                    "metricas": {},
+                }
+            )
+
+    # ========================================================
+    # Resumen de la corrida
+    # ========================================================
+
+    exitosas = sum(
+        1
+        for resultado in resultados
+        if resultado["error"] is None
+    )
+
+    fallidas = (
+        len(resultados)
+        - exitosas
+    )
+
+    resumen = {
+        "resultados": resultados,
+        "total_vacantes": len(
+            vacantes
+        ),
+        "procesadas_exitosamente": exitosas,
+        "fallidas": fallidas,
+    }
+
+    logger.info(
+        "Ranking múltiple finalizado: "
+        "%d vacantes, %d exitosas, %d fallidas.",
+        resumen["total_vacantes"],
+        resumen["procesadas_exitosamente"],
+        resumen["fallidas"],
+    )
+
+    return resumen

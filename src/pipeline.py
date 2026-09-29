@@ -12,6 +12,10 @@ Sprint 5 - Issue #46:
 Sprint 5 - Issue #11:
     El pipeline puede recibir correos provenientes de Gmail manteniendo
     compatibilidad con la bandeja local utilizada por las pruebas.
+
+Sprint 5 - Issue #45:
+    Los adjuntos se escanean contra malware antes de entrar al pipeline
+    de extracción de texto.
 """
 
 import json
@@ -22,6 +26,7 @@ from pathlib import Path
 from . import (
     attachment_handler,
     email_detector,
+    malware_scanner,
     profile_repository,
     profile_structurer,
     schema,
@@ -78,6 +83,24 @@ def procesar_correo(
             correo.email_id,
             "error",
             adjunto.motivo,
+        )
+
+    # Sprint 5 - Issue #45:
+    # Escanear el adjunto antes de permitir la extracción de texto.
+    try:
+        malware_scanner.validar_archivo_seguro(
+            adjunto.ruta_extraida
+        )
+    except (ValueError, RuntimeError, FileNotFoundError) as e:
+        logger.warning(
+            "[%s] adjunto bloqueado por seguridad: %s",
+            correo.email_id,
+            e,
+        )
+        return ResultadoProcesamiento(
+            correo.email_id,
+            "error",
+            f"Escaneo de seguridad fallido: {e}",
         )
 
     # HU-03: extraer texto

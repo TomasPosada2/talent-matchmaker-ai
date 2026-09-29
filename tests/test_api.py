@@ -434,3 +434,174 @@ def test_login_password_incorrecto(monkeypatch):
     )
 
     assert response.status_code == 401
+
+def test_ranking_notifica_al_recruiter(monkeypatch):
+    activar_autenticacion()
+
+    perfiles = [perfil_ejemplo()]
+
+    monkeypatch.setattr(
+        api.profile_repository,
+        "listar_perfiles",
+        lambda: perfiles,
+    )
+
+    class ResultadoFake:
+        ranking = [
+            {
+                "email_id": "email-001",
+                "puntaje": 90,
+                "confianza": 0.95,
+                "razon_confianza": "Evidencia suficiente",
+                "justificacion": [],
+                "requisitos_sin_evidencia": [],
+            }
+        ]
+        pasos = []
+        error = None
+        metricas = {
+            "tokens_totales": 100,
+        }
+
+    monkeypatch.setattr(
+        api.agent,
+        "rankear_candidatos",
+        lambda vacante, perfiles: ResultadoFake(),
+    )
+
+    notificacion = {}
+
+    def enviar_fake(destinatario, ranking):
+        notificacion["destinatario"] = destinatario
+        notificacion["ranking"] = ranking
+        return "mensaje-123"
+
+    monkeypatch.setattr(
+        api.email_notifier,
+        "enviar_notificacion_ranking",
+        enviar_fake,
+    )
+
+    response = client.post(
+        "/rankings",
+        json={
+            "vacante": {
+                "titulo": "Backend Developer",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["notificacion_enviada"] is True
+    assert notificacion["destinatario"] == "recruiter@example.com"
+    assert notificacion["ranking"] == ResultadoFake.ranking
+
+    limpiar_autenticacion()
+
+
+def test_ranking_continua_si_notificacion_falla(monkeypatch):
+    activar_autenticacion()
+
+    monkeypatch.setattr(
+        api.profile_repository,
+        "listar_perfiles",
+        lambda: [perfil_ejemplo()],
+    )
+
+    class ResultadoFake:
+        ranking = [
+            {
+                "email_id": "email-001",
+                "puntaje": 90,
+                "confianza": 0.95,
+                "razon_confianza": "Evidencia suficiente",
+                "justificacion": [],
+                "requisitos_sin_evidencia": [],
+            }
+        ]
+        pasos = []
+        error = None
+        metricas = {}
+
+    monkeypatch.setattr(
+        api.agent,
+        "rankear_candidatos",
+        lambda vacante, perfiles: ResultadoFake(),
+    )
+
+    def enviar_con_error(destinatario, ranking):
+        raise RuntimeError("Gmail no disponible")
+
+    monkeypatch.setattr(
+        api.email_notifier,
+        "enviar_notificacion_ranking",
+        enviar_con_error,
+    )
+
+    response = client.post(
+        "/rankings",
+        json={
+            "vacante": {
+                "titulo": "Backend Developer",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["ranking"] == ResultadoFake.ranking
+    assert data["notificacion_enviada"] is False
+
+    limpiar_autenticacion()
+
+
+def test_ranking_con_error_no_envia_notificacion(monkeypatch):
+    activar_autenticacion()
+
+    monkeypatch.setattr(
+        api.profile_repository,
+        "listar_perfiles",
+        lambda: [perfil_ejemplo()],
+    )
+
+    class ResultadoFake:
+        ranking = None
+        pasos = []
+        error = "Ranking inválido"
+        metricas = {}
+
+    monkeypatch.setattr(
+        api.agent,
+        "rankear_candidatos",
+        lambda vacante, perfiles: ResultadoFake(),
+    )
+
+    llamadas = []
+
+    def enviar_fake(destinatario, ranking):
+        llamadas.append((destinatario, ranking))
+
+    monkeypatch.setattr(
+        api.email_notifier,
+        "enviar_notificacion_ranking",
+        enviar_fake,
+    )
+
+    response = client.post(
+        "/rankings",
+        json={
+            "vacante": {
+                "titulo": "Backend Developer",
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert llamadas == []
+
+    limpiar_autenticacion()

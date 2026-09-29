@@ -1,12 +1,25 @@
+import logging
+
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from src import agent, auth, profile_repository
+from src import (
+    agent,
+    auth,
+    email_notifier,
+    profile_repository,
+)
+
+
+logger = logging.getLogger("api")
 
 
 app = FastAPI(
     title="Talent Matchmaker AI API",
-    description="REST API para consultar perfiles y generar rankings de candidatos.",
+    description=(
+        "REST API para consultar perfiles y generar "
+        "rankings de candidatos."
+    ),
     version="1.0.0",
 )
 
@@ -202,7 +215,10 @@ def generar_ranking(
     if not perfiles:
         raise HTTPException(
             status_code=400,
-            detail="No hay perfiles disponibles para generar el ranking.",
+            detail=(
+                "No hay perfiles disponibles para "
+                "generar el ranking."
+            ),
         )
 
     try:
@@ -223,7 +239,28 @@ def generar_ranking(
             detail=resultado.error,
         )
 
+    # Sprint 5 - Issue #50:
+    # Notificar al recruiter cuando el ranking
+    # finaliza correctamente.
+    notificacion_enviada = False
+
+    try:
+        email_notifier.enviar_notificacion_ranking(
+            destinatario=recruiter["email"],
+            ranking=resultado.ranking,
+        )
+        notificacion_enviada = True
+
+    except Exception as exc:
+        logger.exception(
+            "El ranking terminó correctamente, pero no fue "
+            "posible notificar al recruiter %s: %s",
+            recruiter.get("email"),
+            exc,
+        )
+
     return {
         "ranking": resultado.ranking,
         "metricas": resultado.metricas,
+        "notificacion_enviada": notificacion_enviada,
     }

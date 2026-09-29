@@ -18,3 +18,8 @@ data/salida/
 Thumbs.db
 .vscode/
 .idea/
+
+# Google OAuth credentials
+credentials.json
+token.json
+secrets/

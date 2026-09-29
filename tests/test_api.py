@@ -39,6 +39,23 @@ def perfil_ejemplo():
     }
 
 
+def recruiter_autenticado():
+    return {
+        "id": 1,
+        "email": "recruiter@example.com",
+    }
+
+
+def activar_autenticacion():
+    api.app.dependency_overrides[
+        api.auth.obtener_recruiter_actual
+    ] = recruiter_autenticado
+
+
+def limpiar_autenticacion():
+    api.app.dependency_overrides.clear()
+
+
 def test_health():
     response = client.get("/health")
 
@@ -49,7 +66,32 @@ def test_health():
     }
 
 
+def test_profiles_requiere_autenticacion():
+    limpiar_autenticacion()
+
+    response = client.get("/profiles")
+
+    assert response.status_code in (401, 403)
+
+
+def test_rankings_requiere_autenticacion():
+    limpiar_autenticacion()
+
+    response = client.post(
+        "/rankings",
+        json={
+            "vacante": {
+                "titulo": "Backend Developer",
+            }
+        },
+    )
+
+    assert response.status_code in (401, 403)
+
+
 def test_listar_perfiles(monkeypatch):
+    activar_autenticacion()
+
     perfiles = [perfil_ejemplo()]
 
     monkeypatch.setattr(
@@ -64,8 +106,12 @@ def test_listar_perfiles(monkeypatch):
     assert response.json()["total"] == 1
     assert response.json()["profiles"] == perfiles
 
+    limpiar_autenticacion()
+
 
 def test_obtener_perfil(monkeypatch):
+    activar_autenticacion()
+
     perfil = perfil_ejemplo()
 
     monkeypatch.setattr(
@@ -74,26 +120,41 @@ def test_obtener_perfil(monkeypatch):
         lambda email_id: perfil,
     )
 
-    response = client.get("/profiles/email-001")
+    response = client.get(
+        "/profiles/email-001"
+    )
 
     assert response.status_code == 200
     assert response.json() == perfil
 
+    limpiar_autenticacion()
+
 
 def test_perfil_no_encontrado(monkeypatch):
+    activar_autenticacion()
+
     monkeypatch.setattr(
         api.profile_repository,
         "obtener_perfil",
         lambda email_id: None,
     )
 
-    response = client.get("/profiles/no-existe")
+    response = client.get(
+        "/profiles/no-existe"
+    )
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "Perfil no encontrado."
+    assert (
+        response.json()["detail"]
+        == "Perfil no encontrado."
+    )
+
+    limpiar_autenticacion()
 
 
 def test_error_listando_perfiles(monkeypatch):
+    activar_autenticacion()
+
     def lanzar_error():
         raise RuntimeError("DB error")
 
@@ -107,8 +168,12 @@ def test_error_listando_perfiles(monkeypatch):
 
     assert response.status_code == 500
 
+    limpiar_autenticacion()
+
 
 def test_ranking_sin_perfiles(monkeypatch):
+    activar_autenticacion()
+
     monkeypatch.setattr(
         api.profile_repository,
         "listar_perfiles",
@@ -126,8 +191,12 @@ def test_ranking_sin_perfiles(monkeypatch):
 
     assert response.status_code == 400
 
+    limpiar_autenticacion()
+
 
 def test_generar_ranking(monkeypatch):
+    activar_autenticacion()
+
     perfiles = [perfil_ejemplo()]
 
     monkeypatch.setattr(
@@ -172,13 +241,23 @@ def test_generar_ranking(monkeypatch):
 
     data = response.json()
 
-    assert data["ranking"][0]["email_id"] == "email-001"
+    assert (
+        data["ranking"][0]["email_id"]
+        == "email-001"
+    )
     assert data["ranking"][0]["puntaje"] == 90
     assert data["ranking"][0]["confianza"] == 0.95
-    assert data["metricas"]["tokens_totales"] == 100
+    assert (
+        data["metricas"]["tokens_totales"]
+        == 100
+    )
+
+    limpiar_autenticacion()
 
 
 def test_error_del_agente(monkeypatch):
+    activar_autenticacion()
+
     monkeypatch.setattr(
         api.profile_repository,
         "listar_perfiles",
@@ -207,4 +286,151 @@ def test_error_del_agente(monkeypatch):
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"] == "Ranking inválido"
+    assert (
+        response.json()["detail"]
+        == "Ranking inválido"
+    )
+
+    limpiar_autenticacion()
+
+
+def test_registrar_recruiter(monkeypatch):
+    monkeypatch.setattr(
+        api.auth,
+        "crear_tabla_recruiters",
+        lambda: None,
+    )
+
+    monkeypatch.setattr(
+        api.auth,
+        "obtener_recruiter_por_email",
+        lambda email: None,
+    )
+
+    monkeypatch.setattr(
+        api.auth,
+        "crear_recruiter",
+        lambda email, password: {
+            "id": 1,
+            "email": email,
+        },
+    )
+
+    response = client.post(
+        "/auth/register",
+        json={
+            "email": "recruiter@example.com",
+            "password": "Password123!",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "id": 1,
+        "email": "recruiter@example.com",
+    }
+
+
+def test_recruiter_duplicado(monkeypatch):
+    monkeypatch.setattr(
+        api.auth,
+        "crear_tabla_recruiters",
+        lambda: None,
+    )
+
+    monkeypatch.setattr(
+        api.auth,
+        "obtener_recruiter_por_email",
+        lambda email: {
+            "id": 1,
+            "email": email,
+        },
+    )
+
+    response = client.post(
+        "/auth/register",
+        json={
+            "email": "recruiter@example.com",
+            "password": "Password123!",
+        },
+    )
+
+    assert response.status_code == 409
+
+
+def test_login_correcto(monkeypatch):
+    monkeypatch.setattr(
+        api.auth,
+        "crear_tabla_recruiters",
+        lambda: None,
+    )
+
+    monkeypatch.setattr(
+        api.auth,
+        "obtener_recruiter_por_email",
+        lambda email: {
+            "id": 1,
+            "email": email,
+            "password_hash": "hash",
+        },
+    )
+
+    monkeypatch.setattr(
+        api.auth,
+        "verificar_password",
+        lambda password, hashed: True,
+    )
+
+    monkeypatch.setattr(
+        api.auth,
+        "crear_access_token",
+        lambda email: "jwt-de-prueba",
+    )
+
+    response = client.post(
+        "/auth/login",
+        json={
+            "email": "recruiter@example.com",
+            "password": "Password123!",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "access_token": "jwt-de-prueba",
+        "token_type": "bearer",
+    }
+
+
+def test_login_password_incorrecto(monkeypatch):
+    monkeypatch.setattr(
+        api.auth,
+        "crear_tabla_recruiters",
+        lambda: None,
+    )
+
+    monkeypatch.setattr(
+        api.auth,
+        "obtener_recruiter_por_email",
+        lambda email: {
+            "id": 1,
+            "email": email,
+            "password_hash": "hash",
+        },
+    )
+
+    monkeypatch.setattr(
+        api.auth,
+        "verificar_password",
+        lambda password, hashed: False,
+    )
+
+    response = client.post(
+        "/auth/login",
+        json={
+            "email": "recruiter@example.com",
+            "password": "incorrecta",
+        },
+    )
+
+    assert response.status_code == 401

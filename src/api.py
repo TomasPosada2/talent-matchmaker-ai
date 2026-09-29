@@ -7,6 +7,7 @@ from src import (
     agent,
     auth,
     email_notifier,
+    job_template_repository,
     profile_repository,
 )
 
@@ -46,6 +47,17 @@ class RecruiterRegisterRequest(BaseModel):
 class RecruiterLoginRequest(BaseModel):
     email: str
     password: str
+
+
+class JobTemplateRequest(BaseModel):
+    nombre: str = Field(
+        ...,
+        min_length=1,
+    )
+    vacante: dict = Field(
+        ...,
+        description="Descripción estructurada de la vacante.",
+    )
 
 
 # ============================================================
@@ -190,6 +202,96 @@ def obtener_perfil(
         )
 
     return perfil
+
+
+# ============================================================
+# Job templates protegidos
+# ============================================================
+
+@app.post("/job-templates", status_code=201)
+def guardar_job_template(
+    request: JobTemplateRequest,
+    recruiter: dict = Depends(
+        auth.obtener_recruiter_actual
+    ),
+):
+    try:
+        job_template_repository.crear_tabla()
+
+        plantilla = (
+            job_template_repository.guardar_plantilla(
+                recruiter_id=recruiter["id"],
+                nombre=request.nombre,
+                vacante=request.vacante,
+            )
+        )
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="No fue posible guardar la plantilla.",
+        ) from exc
+
+    return plantilla
+
+
+@app.get("/job-templates")
+def listar_job_templates(
+    recruiter: dict = Depends(
+        auth.obtener_recruiter_actual
+    ),
+):
+    try:
+        job_template_repository.crear_tabla()
+
+        plantillas = (
+            job_template_repository.listar_plantillas(
+                recruiter_id=recruiter["id"],
+            )
+        )
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="No fue posible consultar las plantillas.",
+        ) from exc
+
+    return {
+        "total": len(plantillas),
+        "templates": plantillas,
+    }
+
+
+@app.get("/job-templates/{template_id}")
+def obtener_job_template(
+    template_id: int,
+    recruiter: dict = Depends(
+        auth.obtener_recruiter_actual
+    ),
+):
+    try:
+        job_template_repository.crear_tabla()
+
+        plantilla = (
+            job_template_repository.obtener_plantilla(
+                recruiter_id=recruiter["id"],
+                template_id=template_id,
+            )
+        )
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="No fue posible consultar la plantilla.",
+        ) from exc
+
+    if plantilla is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Plantilla no encontrada.",
+        )
+
+    return plantilla
 
 
 # ============================================================

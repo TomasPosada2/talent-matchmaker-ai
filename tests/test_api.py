@@ -605,3 +605,156 @@ def test_ranking_con_error_no_envia_notificacion(monkeypatch):
     assert llamadas == []
 
     limpiar_autenticacion()
+
+def test_guardar_job_template(monkeypatch):
+    activar_autenticacion()
+
+    plantilla = {
+        "id": 1,
+        "recruiter_id": 1,
+        "nombre": "Backend Developer",
+        "vacante": {
+            "titulo": "Backend Developer",
+            "experiencia": "3 años",
+        },
+    }
+
+    monkeypatch.setattr(
+        api.job_template_repository,
+        "crear_tabla",
+        lambda: None,
+    )
+
+    monkeypatch.setattr(
+        api.job_template_repository,
+        "guardar_plantilla",
+        lambda recruiter_id, nombre, vacante: plantilla,
+    )
+
+    response = client.post(
+        "/job-templates",
+        json={
+            "nombre": "Backend Developer",
+            "vacante": {
+                "titulo": "Backend Developer",
+                "experiencia": "3 años",
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json() == plantilla
+
+    limpiar_autenticacion()
+
+
+def test_listar_job_templates(monkeypatch):
+    activar_autenticacion()
+
+    plantillas = [
+        {
+            "id": 1,
+            "recruiter_id": 1,
+            "nombre": "Backend",
+            "vacante": {
+                "titulo": "Backend Developer",
+            },
+        },
+        {
+            "id": 2,
+            "recruiter_id": 1,
+            "nombre": "Data",
+            "vacante": {
+                "titulo": "Data Engineer",
+            },
+        },
+    ]
+
+    monkeypatch.setattr(
+        api.job_template_repository,
+        "crear_tabla",
+        lambda: None,
+    )
+
+    monkeypatch.setattr(
+        api.job_template_repository,
+        "listar_plantillas",
+        lambda recruiter_id: plantillas,
+    )
+
+    response = client.get(
+        "/job-templates"
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["total"] == 2
+    assert data["templates"] == plantillas
+
+    limpiar_autenticacion()
+
+
+def test_obtener_job_template(monkeypatch):
+    activar_autenticacion()
+
+    plantilla = {
+        "id": 7,
+        "recruiter_id": 1,
+        "nombre": "Backend",
+        "vacante": {
+            "titulo": "Backend Developer",
+        },
+    }
+
+    monkeypatch.setattr(
+        api.job_template_repository,
+        "crear_tabla",
+        lambda: None,
+    )
+
+    monkeypatch.setattr(
+        api.job_template_repository,
+        "obtener_plantilla",
+        lambda recruiter_id, template_id: plantilla,
+    )
+
+    response = client.get(
+        "/job-templates/7"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == plantilla
+
+    limpiar_autenticacion()
+
+
+def test_job_template_ajena_o_inexistente(
+    monkeypatch,
+):
+    activar_autenticacion()
+
+    monkeypatch.setattr(
+        api.job_template_repository,
+        "crear_tabla",
+        lambda: None,
+    )
+
+    monkeypatch.setattr(
+        api.job_template_repository,
+        "obtener_plantilla",
+        lambda recruiter_id, template_id: None,
+    )
+
+    response = client.get(
+        "/job-templates/999"
+    )
+
+    assert response.status_code == 404
+    assert (
+        response.json()["detail"]
+        == "Plantilla no encontrada."
+    )
+
+    limpiar_autenticacion()

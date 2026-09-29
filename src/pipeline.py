@@ -8,6 +8,10 @@ Sprint 1:
 Sprint 5 - Issue #46:
     Los perfiles procesados correctamente se persisten en PostgreSQL
     en lugar de almacenarse en perfiles.json.
+
+Sprint 5 - Issue #11:
+    El pipeline puede recibir correos provenientes de Gmail manteniendo
+    compatibilidad con la bandeja local utilizada por las pruebas.
 """
 
 import json
@@ -137,21 +141,34 @@ def procesar_correo(
 
 
 def procesar_lote(
-    inbox_dir: Path,
+    inbox_dir: Path | None,
     carpeta_trabajo: Path,
+    correos: list[email_detector.CorreoDetectado] | None = None,
 ) -> dict:
     """
     Procesa todos los correos de una bandeja.
+
+    Si se proporciona ``correos``, procesa directamente esa lista.
+    Esto permite utilizar correos obtenidos desde Gmail.
+
+    Si ``correos`` es None, mantiene el comportamiento anterior y
+    escanea ``inbox_dir``.
 
     Sprint 5 #46:
     Los perfiles válidos se almacenan en PostgreSQL.
     El reporte operativo del lote continúa guardándose como JSON.
     """
-    inbox_dir = Path(inbox_dir)
     carpeta_trabajo = Path(carpeta_trabajo)
     carpeta_trabajo.mkdir(parents=True, exist_ok=True)
 
-    correos = email_detector.escanear_bandeja(inbox_dir)
+    if correos is None:
+        if inbox_dir is None:
+            raise ValueError(
+                "Debe proporcionarse inbox_dir o una lista de correos."
+            )
+
+        inbox_dir = Path(inbox_dir)
+        correos = email_detector.escanear_bandeja(inbox_dir)
 
     resultados = [
         procesar_correo(correo, carpeta_trabajo)
@@ -215,11 +232,8 @@ def procesar_lote(
         ],
     }
 
-    # --------------------------------------------------------
     # Sprint 5 - Issue #46
-    # Persistencia relacional de perfiles
-    # --------------------------------------------------------
-
+    # Persistencia relacional de perfiles.
     profile_repository.crear_tablas()
 
     for resultado in exitosos:
@@ -236,7 +250,6 @@ def procesar_lote(
             raise
 
     # El reporte operativo continúa siendo un artefacto JSON.
-    # perfiles.json deja de ser el mecanismo de persistencia.
     with open(
         carpeta_trabajo / "reporte_lote.json",
         "w",

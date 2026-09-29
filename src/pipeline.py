@@ -1,21 +1,37 @@
 """
-Orquesta el pipeline completo del Sprint 1:
+Orquesta el pipeline completo de procesamiento de candidatos.
 
+Sprint 1:
     HU-01 detectar_correo -> HU-02 extraer_adjunto -> HU-03 extraer_texto
-    -> HU-04/HU-05 estructurar_perfil -> HU-06 validar_perfil
+    -> HU-04/HU-05 estructurar_perfil -> HU-06 validar_perfil.
 
-HU-07: procesar_lote corre esto sobre todos los correos de la bandeja simulada
-       y reporta la tasa de éxito.
-HU-08: cada etapa captura sus propios errores; un CV que falla no detiene el
-       resto del lote, y todo queda registrado en el log / reporte.
+Sprint 5 - Issue #46:
+    Los perfiles procesados correctamente se persisten en PostgreSQL
+    en lugar de almacenarse en perfiles.json.
+
+Sprint 5 - Issue #11:
+    El pipeline puede recibir correos provenientes de Gmail manteniendo
+    compatibilidad con la bandeja local utilizada por las pruebas.
+
+Sprint 5 - Issue #45:
+    Los adjuntos se escanean contra malware antes de entrar al pipeline
+    de extracción de texto.
 """
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
-from . import email_detector, attachment_handler, text_extractor, profile_structurer, schema
+from . import (
+    attachment_handler,
+    email_detector,
+    malware_scanner,
+    profile_repository,
+    profile_structurer,
+    schema,
+    text_extractor,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,26 +48,78 @@ class ResultadoProcesamiento:
     perfil: dict | None = None
 
 
-def procesar_correo(correo: email_detector.CorreoDetectado, carpeta_trabajo: Path) -> ResultadoProcesamiento:
+def procesar_correo(
+    correo: email_detector.CorreoDetectado,
+    carpeta_trabajo: Path,
+) -> ResultadoProcesamiento:
     if correo.estado == "ignorado_sin_adjunto":
-        return ResultadoProcesamiento(correo.email_id, "ignorado", correo.motivo)
+        return ResultadoProcesamiento(
+            correo.email_id,
+            "ignorado",
+            correo.motivo,
+        )
 
     if correo.estado == "descartado_formato_no_soportado":
-        return ResultadoProcesamiento(correo.email_id, "descartado", correo.motivo)
+        return ResultadoProcesamiento(
+            correo.email_id,
+            "descartado",
+            correo.motivo,
+        )
 
     # HU-02: extraer y validar el adjunto
     adjunto = attachment_handler.extraer_adjunto(
-        correo.email_id, correo.adjunto_valido, carpeta_trabajo / "adjuntos_extraidos"
+        correo.email_id,
+        correo.adjunto_valido,
+        carpeta_trabajo / "adjuntos_extraidos",
     )
+
     if not adjunto.valido:
-        logger.warning("[%s] adjunto inválido: %s", correo.email_id, adjunto.motivo)
-        return ResultadoProcesamiento(correo.email_id, "error", adjunto.motivo)
+        logger.warning(
+            "[%s] adjunto inválido: %s",
+            correo.email_id,
+            adjunto.motivo,
+        )
+        return ResultadoProcesamiento(
+            correo.email_id,
+            "error",
+            adjunto.motivo,
+        )
+
+    # Sprint 5 - Issue #45:
+    # Escanear el adjunto antes de permitir la extracción de texto.
+    try:
+        malware_scanner.validar_archivo_seguro(
+            adjunto.ruta_extraida
+        )
+    except (ValueError, RuntimeError, FileNotFoundError) as e:
+        logger.warning(
+            "[%s] adjunto bloqueado por seguridad: %s",
+            correo.email_id,
+            e,
+        )
+        return ResultadoProcesamiento(
+            correo.email_id,
+            "error",
+            f"Escaneo de seguridad fallido: {e}",
+        )
 
     # HU-03: extraer texto
-    texto = text_extractor.extraer_texto(correo.email_id, adjunto.ruta_extraida)
+    texto = text_extractor.extraer_texto(
+        correo.email_id,
+        adjunto.ruta_extraida,
+    )
+
     if not texto.procesable:
-        logger.warning("[%s] texto no procesable: %s", correo.email_id, texto.motivo)
-        return ResultadoProcesamiento(correo.email_id, "error", texto.motivo)
+        logger.warning(
+            "[%s] texto no procesable: %s",
+            correo.email_id,
+            texto.motivo,
+        )
+        return ResultadoProcesamiento(
+            correo.email_id,
+            "error",
+            texto.motivo,
+        )
 
     # HU-04/HU-05: estructurar perfil con evidencia
     try:
@@ -62,37 +130,109 @@ def procesar_correo(correo: email_detector.CorreoDetectado, carpeta_trabajo: Pat
             lineas=texto.lineas,
         )
     except Exception as e:
-        logger.error("[%s] error estructurando perfil: %s", correo.email_id, e)
-        return ResultadoProcesamiento(correo.email_id, "error", f"Error estructurando perfil: {e}")
+        logger.error(
+            "[%s] error estructurando perfil: %s",
+            correo.email_id,
+            e,
+        )
+        return ResultadoProcesamiento(
+            correo.email_id,
+            "error",
+            f"Error estructurando perfil: {e}",
+        )
 
     # HU-06: validar contra el schema
     es_valido, error_schema = schema.validar_perfil(perfil)
+
     if not es_valido:
-        logger.error("[%s] JSON inválido contra schema: %s", correo.email_id, error_schema)
-        return ResultadoProcesamiento(correo.email_id, "error", f"JSON inválido: {error_schema}")
+        logger.error(
+            "[%s] perfil inválido contra schema: %s",
+            correo.email_id,
+            error_schema,
+        )
+        return ResultadoProcesamiento(
+            correo.email_id,
+            "error",
+            f"Perfil inválido: {error_schema}",
+        )
 
-    return ResultadoProcesamiento(correo.email_id, "exito", perfil=perfil)
+    return ResultadoProcesamiento(
+        correo.email_id,
+        "exito",
+        perfil=perfil,
+    )
 
 
-def procesar_lote(inbox_dir: Path, carpeta_trabajo: Path) -> dict:
+def procesar_lote(
+    inbox_dir: Path | None,
+    carpeta_trabajo: Path,
+    correos: list[email_detector.CorreoDetectado] | None = None,
+) -> dict:
     """
-    HU-07: corre el pipeline completo sobre todos los correos de la bandeja
-    simulada y devuelve un reporte con la tasa de éxito y los casos fallidos.
+    Procesa todos los correos de una bandeja.
+
+    Si se proporciona ``correos``, procesa directamente esa lista.
+    Esto permite utilizar correos obtenidos desde Gmail.
+
+    Si ``correos`` es None, mantiene el comportamiento anterior y
+    escanea ``inbox_dir``.
+
+    Sprint 5 #46:
+    Los perfiles válidos se almacenan en PostgreSQL.
+    El reporte operativo del lote continúa guardándose como JSON.
     """
-    inbox_dir = Path(inbox_dir)
     carpeta_trabajo = Path(carpeta_trabajo)
     carpeta_trabajo.mkdir(parents=True, exist_ok=True)
 
-    correos = email_detector.escanear_bandeja(inbox_dir)
-    resultados = [procesar_correo(c, carpeta_trabajo) for c in correos]
+    if correos is None:
+        if inbox_dir is None:
+            raise ValueError(
+                "Debe proporcionarse inbox_dir o una lista de correos."
+            )
 
-    candidatos = [r for r in resultados if r.estado in ("exito", "error")]
-    exitosos = [r for r in resultados if r.estado == "exito"]
-    fallidos = [r for r in resultados if r.estado == "error"]
-    ignorados = [r for r in resultados if r.estado == "ignorado"]
-    descartados = [r for r in resultados if r.estado == "descartado"]
+        inbox_dir = Path(inbox_dir)
+        correos = email_detector.escanear_bandeja(inbox_dir)
 
-    tasa_exito = (len(exitosos) / len(candidatos)) if candidatos else 0.0
+    resultados = [
+        procesar_correo(correo, carpeta_trabajo)
+        for correo in correos
+    ]
+
+    candidatos = [
+        resultado
+        for resultado in resultados
+        if resultado.estado in ("exito", "error")
+    ]
+
+    exitosos = [
+        resultado
+        for resultado in resultados
+        if resultado.estado == "exito"
+    ]
+
+    fallidos = [
+        resultado
+        for resultado in resultados
+        if resultado.estado == "error"
+    ]
+
+    ignorados = [
+        resultado
+        for resultado in resultados
+        if resultado.estado == "ignorado"
+    ]
+
+    descartados = [
+        resultado
+        for resultado in resultados
+        if resultado.estado == "descartado"
+    ]
+
+    tasa_exito = (
+        len(exitosos) / len(candidatos)
+        if candidatos
+        else 0.0
+    )
 
     reporte = {
         "total_correos_en_bandeja": len(resultados),
@@ -103,22 +243,57 @@ def procesar_lote(inbox_dir: Path, carpeta_trabajo: Path) -> dict:
         "descartados_formato_no_soportado": len(descartados),
         "tasa_exito": round(tasa_exito, 4),
         "detalle_fallidos": [
-            {"email_id": r.email_id, "motivo": r.motivo} for r in fallidos
+            {
+                "email_id": resultado.email_id,
+                "motivo": resultado.motivo,
+            }
+            for resultado in fallidos
         ],
-        "perfiles": [r.perfil for r in exitosos],
+        "perfiles": [
+            resultado.perfil
+            for resultado in exitosos
+        ],
     }
 
-    # Persistir resultados en la carpeta de trabajo
-    with open(carpeta_trabajo / "reporte_lote.json", "w", encoding="utf-8") as f:
-        json.dump(reporte, f, ensure_ascii=False, indent=2)
+    # Sprint 5 - Issue #46
+    # Persistencia relacional de perfiles.
+    profile_repository.crear_tablas()
 
-    with open(carpeta_trabajo / "perfiles.json", "w", encoding="utf-8") as f:
-        json.dump(reporte["perfiles"], f, ensure_ascii=False, indent=2)
+    for resultado in exitosos:
+        try:
+            profile_repository.guardar_perfil(
+                resultado.perfil
+            )
+        except Exception as e:
+            logger.error(
+                "[%s] error guardando perfil en PostgreSQL: %s",
+                resultado.email_id,
+                e,
+            )
+            raise
+
+    # El reporte operativo continúa siendo un artefacto JSON.
+    with open(
+        carpeta_trabajo / "reporte_lote.json",
+        "w",
+        encoding="utf-8",
+    ) as archivo_reporte:
+        json.dump(
+            reporte,
+            archivo_reporte,
+            ensure_ascii=False,
+            indent=2,
+        )
 
     logger.info(
-        "Lote procesado: %d/%d exitosos (tasa=%.1f%%), %d fallidos, %d ignorados, %d descartados",
-        len(exitosos), len(candidatos), tasa_exito * 100,
-        len(fallidos), len(ignorados), len(descartados),
+        "Lote procesado: %d/%d exitosos (tasa=%.1f%%), "
+        "%d fallidos, %d ignorados, %d descartados",
+        len(exitosos),
+        len(candidatos),
+        tasa_exito * 100,
+        len(fallidos),
+        len(ignorados),
+        len(descartados),
     )
 
     return reporte

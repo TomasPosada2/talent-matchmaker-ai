@@ -1,4 +1,8 @@
 
+"""
+Cliente HTTP para conectar el dashboard con FastAPI.
+"""
+
 import os
 
 import httpx
@@ -36,4 +40,34 @@ def consultar_api(ruta: str, token: str | None = None):
         return None, (
             "No fue posible conectar con FastAPI "
             "o interpretar su respuesta."
+        )
+
+
+def iniciar_sesion(correo: str, contrasena: str):
+    """Autentica un recruiter y devuelve (datos, error)."""
+    try:
+        response = httpx.post(
+            f"{API_URL}/auth/login",
+            json={
+                "email": correo,
+                "password": contrasena,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json(), None
+
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (401, 403):
+            return None, "Correo o contraseña incorrectos."
+
+        return None, (
+            f"No fue posible iniciar sesión "
+            f"(error HTTP {exc.response.status_code})."
+        )
+
+    except (httpx.RequestError, ValueError):
+        return None, (
+            "No fue posible conectar con el servidor "
+            "de autenticación."
         )

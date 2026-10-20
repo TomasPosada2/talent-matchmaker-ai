@@ -25,6 +25,12 @@ from dashboard.candidate_filters import (
     preparar_tabla,
 )
 from dashboard.rankings_page import mostrar_rankings
+from dashboard.notifications import (
+    crear_notificacion,
+    contar_no_leidas,
+    marcar_todas_leidas,
+    limpiar_notificaciones,
+)
 
 
 # ---------------------------------------------------------
@@ -66,6 +72,9 @@ st.markdown(
 # Estado de autenticación
 # ---------------------------------------------------------
 
+if "notificaciones" not in st.session_state:
+    st.session_state["notificaciones"] = []
+
 if "access_token" not in st.session_state:
     st.session_state["access_token"] = None
 
@@ -77,6 +86,7 @@ def cerrar_sesion():
     """Elimina los datos de autenticación de la sesión actual."""
     st.session_state["access_token"] = None
     st.session_state["recruiter_email"] = None
+    st.session_state["notificaciones"] = []
     st.session_state.pop("ranking_resultado", None)
     st.session_state.pop("ranking_plantilla_id", None)
 
@@ -178,6 +188,14 @@ with st.sidebar:
             "Notificaciones",
         ],
     )
+
+    pendientes = contar_no_leidas(
+        st.session_state["notificaciones"]
+    )
+    if pendientes:
+        st.caption(
+            f"Notificaciones pendientes: {pendientes}"
+        )
 
     st.divider()
 
@@ -505,6 +523,15 @@ elif pagina == "Vacantes":
                         "se guardó correctamente."
                     )
 
+                    st.session_state["notificaciones"] = (
+                        crear_notificacion(
+                            st.session_state["notificaciones"],
+                            "Vacante creada",
+                            f"Se guardó la plantilla: {nombre_limpio}",
+                            "success",
+                        )
+                    )
+
                     st.json(respuesta)
 
                 else:
@@ -613,8 +640,37 @@ elif pagina == "Vacantes":
 
 elif pagina == "Notificaciones":
     st.title("Notificaciones")
+    st.write("Consulta los eventos de esta sesión.")
 
-    st.info(
-        "El centro de notificaciones "
-        "se implementará en el Issue #57."
-    )
+    notificaciones = st.session_state["notificaciones"]
+    pendientes = contar_no_leidas(notificaciones)
+    st.metric("Sin leer", pendientes)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Marcar todas como leídas"):
+            st.session_state["notificaciones"] = (
+                marcar_todas_leidas(notificaciones)
+            )
+            st.rerun()
+    with col2:
+        if st.button("Limpiar notificaciones"):
+            st.session_state["notificaciones"] = (
+                limpiar_notificaciones()
+            )
+            st.rerun()
+
+    if not notificaciones:
+        st.info("No hay notificaciones en esta sesión.")
+    else:
+        for notificacion in notificaciones:
+            estado = (
+                "Leída" if notificacion["leida"] else "Sin leer"
+            )
+            with st.container(border=True):
+                st.write(
+                    f"**{notificacion['titulo']}** "
+                    f"— {estado}"
+                )
+                st.caption(notificacion["fecha"])
+                st.write(notificacion["mensaje"])

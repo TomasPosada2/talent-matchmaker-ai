@@ -6,6 +6,7 @@ import streamlit as st
 from dashboard.api_client import consultar_api, enviar_api
 from dashboard.ranking_view import preparar_ranking, preparar_resumen
 from src.demo_ranking import generar_ranking_demo
+from dashboard.notifications import crear_notificacion
 
 
 def mostrar_rankings(token: str):
@@ -185,6 +186,18 @@ def mostrar_rankings(token: str):
                             "generado correctamente."
                         )
 
+                        st.session_state["notificaciones"] = (
+                            crear_notificacion(
+                                st.session_state.get(
+                                    "notificaciones", []
+                                ),
+                                "Ranking generado",
+                                "Se completó un ranking de "
+                                "demostración gratuita.",
+                                "success",
+                            )
+                        )
+
         else:
             with st.spinner(
                 "Evaluando candidatos con Claude..."
@@ -213,6 +226,17 @@ def mostrar_rankings(token: str):
 
                 st.success(
                     "Ranking generado correctamente."
+                )
+
+                st.session_state["notificaciones"] = (
+                    crear_notificacion(
+                        st.session_state.get(
+                            "notificaciones", []
+                        ),
+                        "Ranking generado",
+                        "Se completó un ranking con Claude.",
+                        "success",
+                    )
                 )
 
     # -----------------------------------------------------

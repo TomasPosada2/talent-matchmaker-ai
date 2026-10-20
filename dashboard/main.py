@@ -14,6 +14,7 @@ Ejecución:
 """
 
 import streamlit as st
+from dashboard.ui_style import aplicar_estilos
 
 from dashboard.api_client import (
     consultar_api,
@@ -45,29 +46,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.markdown(
-    """
-    <style>
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-    }
-
-    [data-testid="stMetric"] {
-        background-color: #f1f5f9;
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 18px;
-    }
-
-    [data-testid="stSidebar"] {
-        background-color: #f8fafc;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
+aplicar_estilos()
 
 # ---------------------------------------------------------
 # Estado de autenticación

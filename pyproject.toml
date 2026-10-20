@@ -22,3 +22,4 @@ known-first-party = ["src", "dashboard", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,7 +1,10 @@
 import logging
 import os
+import time
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
 from src import (
@@ -9,10 +12,12 @@ from src import (
     auth,
     email_notifier,
     job_template_repository,
+    observability,
     privacy,
     profile_repository,
 )
 
+observability.configurar_logging()
 logger = logging.getLogger("api")
 
 
@@ -48,6 +53,59 @@ async def agregar_cabeceras_seguridad(request: Request, call_next):
     response = await call_next(request)
     for nombre, valor in CABECERAS_SEGURIDAD.items():
         response.headers.setdefault(nombre, valor)
+    return response
+
+
+# Sprint 7 - #66: métricas, log por petición y alertas de errores/latencia.
+# Se registra después del middleware de cabeceras, así que lo envuelve y
+# también mide las respuestas de error.
+@app.middleware("http")
+async def medir_peticiones(request: Request, call_next):
+    inicio = time.perf_counter()
+
+    try:
+        response = await call_next(request)
+        status = response.status_code
+    except Exception:
+        logger.exception("Error no controlado en %s %s", request.method, request.url.path)
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": "Error interno del servidor."},
+        )
+        status = 500
+
+    duracion = time.perf_counter() - inicio
+    ruta = request.scope.get("route")
+    plantilla = getattr(ruta, "path", "sin_ruta")
+
+    observability.PETICIONES_HTTP.labels(
+        method=request.method, route=plantilla, status=str(status)
+    ).inc()
+    observability.LATENCIA_HTTP.labels(
+        method=request.method, route=plantilla
+    ).observe(duracion)
+
+    logger.info(
+        "%s %s -> %d (%.0f ms)",
+        request.method,
+        plantilla,
+        status,
+        duracion * 1000,
+    )
+
+    if status >= 500:
+        observability.alertar(
+            "error_api",
+            f"{request.method} {plantilla} respondió {status}.",
+            clave=f"error_api:{request.method}:{plantilla}",
+        )
+    elif duracion > observability.umbral_peticion_lenta_segundos():
+        observability.alertar(
+            "latencia_api",
+            f"{request.method} {plantilla} tardó {duracion:.1f} s.",
+            clave=f"latencia_api:{request.method}:{plantilla}",
+        )
+
     return response
 
 
@@ -100,6 +158,42 @@ def health():
         "status": "ok",
         "service": "talent-matchmaker-ai",
     }
+
+
+@app.get("/health/ready")
+def health_ready():
+    """
+    Sprint 7 - #66: verifica dependencias (PostgreSQL).
+
+    /health solo dice que el proceso responde; /health/ready dice si
+    puede atender peticiones reales. Docker y el monitoreo usan este.
+    """
+    try:
+        with profile_repository.obtener_conexion() as conexion:
+            with conexion.cursor() as cursor:
+                cursor.execute("SELECT 1")
+    except Exception:
+        logger.exception("Health check: PostgreSQL no disponible.")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "database": "unavailable"},
+        )
+
+    return {"status": "ok", "database": "ok"}
+
+
+@app.get("/metrics", include_in_schema=False)
+def metricas(request: Request):
+    """
+    Métricas en formato Prometheus.
+
+    Si METRICS_TOKEN está definido, exige ``Authorization: Bearer <token>``.
+    """
+    token = os.getenv("METRICS_TOKEN")
+    if token and request.headers.get("Authorization") != f"Bearer {token}":
+        raise HTTPException(status_code=401, detail="No autorizado.")
+
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 # ============================================================

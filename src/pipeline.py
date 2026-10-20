@@ -20,6 +20,7 @@ Sprint 5 - Issue #45:
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,16 +28,13 @@ from . import (
     attachment_handler,
     email_detector,
     malware_scanner,
+    observability,
     profile_repository,
     profile_structurer,
     schema,
     text_extractor,
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
 logger = logging.getLogger("pipeline")
 
 
@@ -181,6 +179,7 @@ def procesar_lote(
     Los perfiles válidos se almacenan en PostgreSQL.
     El reporte operativo del lote continúa guardándose como JSON.
     """
+    inicio = time.perf_counter()
     carpeta_trabajo = Path(carpeta_trabajo)
     carpeta_trabajo.mkdir(parents=True, exist_ok=True)
 
@@ -283,6 +282,18 @@ def procesar_lote(
             archivo_reporte,
             ensure_ascii=False,
             indent=2,
+        )
+
+    # Sprint 7 - #66: métricas del lote y alerta si fallan demasiados CVs.
+    for resultado in resultados:
+        observability.CVS_PROCESADOS.labels(estado=resultado.estado).inc()
+    observability.DURACION_LOTE.observe(time.perf_counter() - inicio)
+
+    if candidatos and len(fallidos) / len(candidatos) > observability.umbral_tasa_fallos_lote():
+        observability.alertar(
+            "pipeline_fallos",
+            f"{len(fallidos)} de {len(candidatos)} CVs fallaron en el último lote.",
+            clave="pipeline_fallos",
         )
 
     logger.info(

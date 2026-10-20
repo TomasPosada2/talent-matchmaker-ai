@@ -8,17 +8,20 @@ Los correos obtenidos desde Gmail se convierten en CorreoDetectado,
 manteniendo intactas las etapas posteriores del pipeline.
 """
 
+import os
 from pathlib import Path
 
 from src.gmail_inbox import obtener_correos_gmail
+from src.observability import configurar_logging
 from src.pipeline import procesar_lote
 
 BASE_DIR = Path(__file__).resolve().parent
-CARPETA_TRABAJO = BASE_DIR / "data" / "salida"
+CARPETA_TRABAJO = Path(os.getenv("DATA_DIR", BASE_DIR / "data" / "salida"))
 CARPETA_GMAIL = CARPETA_TRABAJO / "gmail"
 
 
 def main():
+    configurar_logging()
     print("Conectando con Gmail...")
 
     correos = obtener_correos_gmail(

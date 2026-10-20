@@ -1,6 +1,7 @@
 import logging
+import os
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from src import (
@@ -14,6 +15,11 @@ from src import (
 logger = logging.getLogger("api")
 
 
+def _docs_habilitados() -> bool:
+    """Swagger/OpenAPI solo se expone si ENABLE_API_DOCS lo permite."""
+    return os.getenv("ENABLE_API_DOCS", "true").lower() in ("1", "true", "yes")
+
+
 app = FastAPI(
     title="Talent Matchmaker AI API",
     description=(
@@ -21,7 +27,27 @@ app = FastAPI(
         "rankings de candidatos."
     ),
     version="1.0.0",
+    docs_url="/docs" if _docs_habilitados() else None,
+    redoc_url="/redoc" if _docs_habilitados() else None,
+    openapi_url="/openapi.json" if _docs_habilitados() else None,
 )
+
+
+# Sprint 7 - #61: cabeceras de seguridad (A05 Security Misconfiguration).
+CABECERAS_SEGURIDAD = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",
+}
+
+
+@app.middleware("http")
+async def agregar_cabeceras_seguridad(request: Request, call_next):
+    response = await call_next(request)
+    for nombre, valor in CABECERAS_SEGURIDAD.items():
+        response.headers.setdefault(nombre, valor)
+    return response
 
 
 # ============================================================
@@ -40,6 +66,10 @@ class RecruiterRegisterRequest(BaseModel):
     password: str = Field(
         ...,
         min_length=8,
+    )
+    role: str = Field(
+        "recruiter",
+        pattern="^(recruiter|admin)$",
     )
 
 
@@ -78,7 +108,11 @@ def health():
 @app.post("/auth/register", status_code=201)
 def registrar_recruiter(
     request: RecruiterRegisterRequest,
+    admin: dict = Depends(auth.requerir_admin),
 ):
+    # Sprint 7 - #61: solo un admin puede crear cuentas. Antes el registro
+    # era público y cualquiera podía crear una cuenta y leer los CVs.
+    # El primer admin se crea con scripts/create_admin.py.
     try:
         auth.crear_tabla_recruiters()
 
@@ -95,6 +129,7 @@ def registrar_recruiter(
         recruiter = auth.crear_recruiter(
             request.email,
             request.password,
+            request.role,
         )
 
     except HTTPException:
@@ -113,6 +148,15 @@ def registrar_recruiter(
 def login_recruiter(
     request: RecruiterLoginRequest,
 ):
+    if auth.login_bloqueado(request.email):
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Demasiados intentos fallidos. "
+                "Intenta de nuevo más tarde."
+            ),
+        )
+
     try:
         auth.crear_tabla_recruiters()
 
@@ -127,6 +171,8 @@ def login_recruiter(
         ) from exc
 
     if recruiter is None:
+        auth.verificar_password_ficticio(request.password)
+        auth.registrar_login_fallido(request.email)
         raise HTTPException(
             status_code=401,
             detail="Credenciales inválidas.",
@@ -136,10 +182,13 @@ def login_recruiter(
         request.password,
         recruiter["password_hash"],
     ):
+        auth.registrar_login_fallido(request.email)
         raise HTTPException(
             status_code=401,
             detail="Credenciales inválidas.",
         )
+
+    auth.limpiar_intentos_login(request.email)
 
     token = auth.crear_access_token(
         recruiter["email"]

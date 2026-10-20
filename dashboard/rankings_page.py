@@ -5,7 +5,11 @@ import streamlit as st
 
 from dashboard.api_client import consultar_api, enviar_api
 from dashboard.notifications import crear_notificacion
-from dashboard.ranking_view import preparar_ranking, preparar_resumen
+from dashboard.ranking_view import (
+    escapar_markdown,
+    preparar_ranking,
+    preparar_resumen,
+)
 from src.demo_ranking import generar_ranking_demo
 
 
@@ -105,9 +109,9 @@ def mostrar_rankings(token: str):
     plantilla = opciones[seleccion]
     vacante = plantilla["vacante"]
 
-    st.write(
-        "**Cargo:**",
-        vacante.get("cargo", "Sin especificar"),
+    st.markdown(
+        "**Cargo:** "
+        + escapar_markdown(vacante.get("cargo", "Sin especificar"))
     )
 
     requisitos = vacante.get("requisitos", [])
@@ -116,7 +120,7 @@ def mostrar_rankings(token: str):
         st.write("**Requisitos:**")
 
         for requisito in requisitos:
-            st.write(f"- {requisito}")
+            st.markdown(f"- {escapar_markdown(requisito)}")
 
     # -----------------------------------------------------
     # Generación del ranking
@@ -324,7 +328,7 @@ def mostrar_rankings(token: str):
         start=1,
     ):
         with st.expander(
-            f"#{posicion} — {candidato['email_id']} "
+            f"#{posicion} — {escapar_markdown(candidato['email_id'])} "
             f"— {candidato['puntaje']} puntos"
         ):
             col1, col2 = st.columns(2)
@@ -345,8 +349,8 @@ def mostrar_rankings(token: str):
                 "**Explicación de confianza:**"
             )
 
-            st.write(
-                candidato["razon_confianza"]
+            st.markdown(
+                escapar_markdown(candidato["razon_confianza"])
                 or "Sin explicación disponible."
             )
 
@@ -359,14 +363,14 @@ def mostrar_rankings(token: str):
                     if not isinstance(elemento, dict):
                         continue
 
-                    st.write(
+                    st.markdown(
                         "**Requisito:** "
-                        f"{elemento.get('requisito', '')}"
+                        + escapar_markdown(elemento.get("requisito", ""))
                     )
 
-                    st.write(
+                    st.markdown(
                         "**Evidencia:** "
-                        f"{elemento.get('evidencia', '')}"
+                        + escapar_markdown(elemento.get("evidencia", ""))
                     )
 
                     st.divider()
@@ -386,7 +390,7 @@ def mostrar_rankings(token: str):
                 for requisito in candidato[
                     "requisitos_sin_evidencia"
                 ]:
-                    st.write(f"- {requisito}")
+                    st.markdown(f"- {escapar_markdown(requisito)}")
 
             else:
                 st.success(

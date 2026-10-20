@@ -15,6 +15,7 @@ Sprint 4:
 import asyncio
 import json
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -37,7 +38,8 @@ logger = logging.getLogger("agent")
 
 
 MAX_PASOS = 8
-MODELO = "claude-sonnet-5"
+# Sprint 7 - #65: configurable por entorno sin cambiar código.
+MODELO = os.getenv("CLAUDE_MODEL", "claude-sonnet-5")
 SERVIDOR_MCP = "talent_matchmaker"
 
 MAX_REINTENTOS_TOOL = 3

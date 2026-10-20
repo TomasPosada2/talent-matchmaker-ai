@@ -1,0 +1,201 @@
+# Talent Matchmaker AI — despliegue con Docker Compose (Sprint 7 - #65).
+#
+#   docker compose up -d --build                       # núcleo: db, clamav, api, dashboard, backups, mantenimiento
+#   docker compose run --rm api python scripts/seed_demo.py   # datos de demostración
+#   docker compose --profile gmail up -d               # + listener de Gmail
+#   docker compose --profile monitoring up -d          # + Prometheus
+#   docker compose --profile proxy up -d               # + HTTPS público con Caddy
+#
+# Ver docs/runbook.md.
+
+x-app: &app
+  build: .
+  image: talent-matchmaker-ai:latest
+  restart: unless-stopped
+  environment: &app-env
+    APP_ENV: ${APP_ENV:-local}
+    DATABASE_URL: postgresql://${POSTGRES_USER:-talent}:${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env}@db:5432/${POSTGRES_DB:-talent_matchmaker}
+    JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en .env (mínimo 32 caracteres)}
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-5}
+    CLAMAV_HOST: clamav
+    CLAMAV_PORT: "3310"
+    DATA_DIR: /app/data/salida
+    RETENTION_DAYS: ${RETENTION_DAYS:-180}
+    ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+    LOG_FORMAT: ${LOG_FORMAT:-text}
+    SLOW_REQUEST_SECONDS: ${SLOW_REQUEST_SECONDS:-30}
+    METRICS_TOKEN: ${METRICS_TOKEN:-}
+    DEMO_ADMIN_EMAIL: ${DEMO_ADMIN_EMAIL:-admin@demo.local}
+    DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-}
+  volumes:
+    - app-data:/app/data
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-talent_matchmaker}
+      POSTGRES_USER: ${POSTGRES_USER:-talent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  clamav:
+    image: clamav/clamav:1.4
+    restart: unless-stopped
+    volumes:
+      - clamav-db:/var/lib/clamav
+    healthcheck:
+      # La primera vez descarga las firmas (~300 MB); puede tardar varios minutos.
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
+
+  api:
+    <<: *app
+    command: ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    environment:
+      <<: *app-env
+      ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  dashboard:
+    <<: *app
+    command:
+      - streamlit
+      - run
+      - dashboard/main.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.headless=true
+      - --browser.gatherUsageStats=false
+    environment:
+      <<: *app-env
+      API_URL: http://api:8000
+      PYTHONPATH: /app
+    ports:
+      - "127.0.0.1:8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8501/_stcore/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  listener:
+    <<: *app
+    profiles: ["gmail"]
+    command: ["python", "run_listener.py"]
+    environment:
+      <<: *app-env
+      GMAIL_CREDENTIALS_PATH: /run/secrets/gmail/credentials.json
+      GMAIL_TOKEN_PATH: /run/secrets/gmail/token.json
+      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-60}
+    volumes:
+      - app-data:/app/data
+      # token.json se refresca solo, por eso el montaje es de escritura.
+      - ./secrets:/run/secrets/gmail
+    depends_on:
+      db:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys; from src.observability import heartbeat_vigente; sys.exit(0 if heartbeat_vigente('/app/data/salida/listener_heartbeat.json', 300) else 1)"
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # Purga diaria de datos vencidos (#63).
+  maintenance:
+    <<: *app
+    command: ["sh", "-c", "while true; do python scripts/purge_expired_data.py; sleep 86400; done"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Backup diario de PostgreSQL y de los CVs en disco (#67).
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGDATABASE: ${POSTGRES_DB:-talent_matchmaker}
+      PGUSER: ${POSTGRES_USER:-talent}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env}
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+    command: ["sh", "/scripts/backup_loop.sh"]
+    volumes:
+      - ./scripts/backup.sh:/scripts/backup.sh:ro
+      - ./scripts/backup_loop.sh:/scripts/backup_loop.sh:ro
+      - ./scripts/restore.sh:/scripts/restore.sh:ro
+      - ./backups:/backups
+      - app-data:/app/data:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - api
+
+  # HTTPS público: Caddy obtiene el certificado de Let's Encrypt para DOMAIN.
+  proxy:
+    image: caddy:2.8-alpine
+    profiles: ["proxy"]
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - dashboard
+
+volumes:
+  db-data:
+  app-data:
+  clamav-db:
+  prometheus-data:
+  caddy-data:

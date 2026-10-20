@@ -1,0 +1,12 @@
+# Caddy termina TLS (certificado automático de Let's Encrypt) y publica
+# solo el dashboard. La API queda en la red interna de Docker.
+{$DOMAIN} {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+	reverse_proxy dashboard:8501
+}

@@ -43,3 +43,17 @@ jobs:
       - run: pip install "pip-audit>=2.7"
       # Falla el PR si alguna dependencia fijada tiene una vulnerabilidad conocida.
       - run: pip-audit -r constraints.txt --no-deps --disable-pip
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validar docker-compose.yml
+        env:
+          POSTGRES_PASSWORD: ci
+          JWT_SECRET: ci-secret-de-al-menos-treinta-y-dos-caracteres
+        run: docker compose config -q
+      - name: Construir la imagen
+        run: docker build -t talent-matchmaker-ai:ci .
+      - name: Verificar que la imagen importa la API y tiene OCR
+        run: docker run --rm talent-matchmaker-ai:ci sh -c "python -c 'import src.api' && tesseract --version"

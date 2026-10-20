@@ -105,7 +105,7 @@ def mostrar_login():
 
             enviar = st.form_submit_button(
                 "Iniciar sesión",
-                use_container_width=True,
+                width="stretch",
             )
 
         if enviar:
@@ -208,7 +208,7 @@ with st.sidebar:
 
     if st.button(
         "Cerrar sesión",
-        use_container_width=True,
+        width="stretch",
     ):
         cerrar_sesion()
         st.rerun()
@@ -485,7 +485,7 @@ elif pagina == "Vacantes":
 
             guardar = st.form_submit_button(
                 "Guardar plantilla",
-                use_container_width=True,
+                width="stretch",
             )
 
         if guardar:

@@ -55,7 +55,7 @@ def _mostrar_usuarios(token: str) -> None:
             options=list(ROLES),
             format_func=ROLES.get,
         )
-        crear = st.form_submit_button("Crear cuenta", use_container_width=True)
+        crear = st.form_submit_button("Crear cuenta", width="stretch")
 
     if crear:
         if not correo.strip() or len(contrasena) < 8:

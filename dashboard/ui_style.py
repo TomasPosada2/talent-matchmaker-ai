@@ -2,7 +2,6 @@
 """Estilos responsive y accesibilidad - Issues #60 y #59."""
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 ESTILOS = """
 <style>
@@ -109,7 +108,7 @@ def aplicar_estilos():
         ESTILOS,
         unsafe_allow_html=True,
     )
-    components.html(FIJAR_IDIOMA, height=0)
+    st.iframe(FIJAR_IDIOMA, height=1)
 
 
 def mostrar_tabla(filas: list[dict]) -> None:
@@ -125,6 +124,6 @@ def mostrar_tabla(filas: list[dict]) -> None:
     else:
         st.dataframe(
             filas,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )

@@ -130,7 +130,7 @@ def mostrar_rankings(token: str):
     if st.button(
         "Generar ranking",
         type="primary",
-        use_container_width=True,
+        width="stretch",
     ):
         if es_demo:
             with st.spinner(

@@ -13,7 +13,6 @@ from googleapiclient.discovery import build
 
 from .gmail_auth import obtener_credenciales_gmail
 
-
 logger = logging.getLogger("email_notifier")
 
 

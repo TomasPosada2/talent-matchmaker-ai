@@ -9,7 +9,6 @@ from pwdlib import PasswordHash
 
 from src import profile_repository
 
-
 ALGORITHM = "HS256"
 TOKEN_EXPIRATION_MINUTES = 60
 ROLES_VALIDOS = {"recruiter", "admin"}

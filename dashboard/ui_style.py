@@ -3,7 +3,6 @@
 
 import streamlit as st
 
-
 ESTILOS = """
 <style>
 /* Diseño general */

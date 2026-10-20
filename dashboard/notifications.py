@@ -3,7 +3,6 @@
 
 from datetime import datetime
 
-
 MAX_NOTIFICACIONES = 50
 
 

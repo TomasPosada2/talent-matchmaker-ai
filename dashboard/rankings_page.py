@@ -4,9 +4,9 @@
 import streamlit as st
 
 from dashboard.api_client import consultar_api, enviar_api
+from dashboard.notifications import crear_notificacion
 from dashboard.ranking_view import preparar_ranking, preparar_resumen
 from src.demo_ranking import generar_ranking_demo
-from dashboard.notifications import crear_notificacion
 
 
 def mostrar_rankings(token: str):

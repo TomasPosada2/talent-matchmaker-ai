@@ -12,7 +12,6 @@ from pathlib import Path
 from .gmail_inbox import obtener_correos_gmail
 from .pipeline import procesar_lote
 
-
 logger = logging.getLogger("email_polling")
 
 

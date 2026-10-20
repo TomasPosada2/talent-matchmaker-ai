@@ -16,7 +16,6 @@ HU-16: heurística de nombre más robusta para plantillas atípicas.
 
 import re
 
-
 EMAIL_REGEX = re.compile(
     r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
 )

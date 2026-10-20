@@ -10,7 +10,6 @@ evaluación profesional de los candidatos.
 import re
 import unicodedata
 
-
 PALABRAS_GENERICAS = {
     "con",
     "de",

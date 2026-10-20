@@ -11,7 +11,6 @@ from src import (
     profile_repository,
 )
 
-
 logger = logging.getLogger("api")
 
 

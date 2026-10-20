@@ -18,7 +18,6 @@ import json
 import re
 from pathlib import Path
 
-
 _CAMPOS_EVIDENCIABLES = [
     "educacion",
     "experiencia",

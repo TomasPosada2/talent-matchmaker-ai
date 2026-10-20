@@ -14,8 +14,8 @@ Ejecución:
 """
 
 import streamlit as st
-from dashboard.ui_style import aplicar_estilos
 
+from dashboard.analytics import mostrar_analitica
 from dashboard.api_client import (
     consultar_api,
     enviar_api,
@@ -25,15 +25,14 @@ from dashboard.candidate_filters import (
     filtrar_candidatos,
     preparar_tabla,
 )
-from dashboard.rankings_page import mostrar_rankings
-from dashboard.analytics import mostrar_analitica
 from dashboard.notifications import (
-    crear_notificacion,
     contar_no_leidas,
-    marcar_todas_leidas,
+    crear_notificacion,
     limpiar_notificaciones,
+    marcar_todas_leidas,
 )
-
+from dashboard.rankings_page import mostrar_rankings
+from dashboard.ui_style import aplicar_estilos
 
 # ---------------------------------------------------------
 # Configuración general

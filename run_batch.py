@@ -13,7 +13,6 @@ from pathlib import Path
 from src.gmail_inbox import obtener_correos_gmail
 from src.pipeline import procesar_lote
 
-
 BASE_DIR = Path(__file__).resolve().parent
 CARPETA_TRABAJO = BASE_DIR / "data" / "salida"
 CARPETA_GMAIL = CARPETA_TRABAJO / "gmail"

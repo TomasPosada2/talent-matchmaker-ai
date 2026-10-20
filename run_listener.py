@@ -10,7 +10,6 @@ from pathlib import Path
 
 from src.email_polling import ejecutar_listener
 
-
 BASE_DIR = Path(__file__).resolve().parent
 
 CARPETA_TRABAJO = BASE_DIR / "data" / "salida"

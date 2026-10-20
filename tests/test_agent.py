@@ -27,7 +27,6 @@ from src.agent import (
     _registrar_paso_agente,
 )
 
-
 # ============================================================
 # HU-13
 # Validación del ranking con evidencia

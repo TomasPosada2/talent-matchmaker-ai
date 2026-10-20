@@ -7,7 +7,6 @@ Sprint 4:
 
 from src.agent_tools import detectar_prompt_injection, verificar_evidencia
 
-
 # ============================================================
 # Sprint 4 - Issue #39
 # Safeguards against prompt injection from CV content

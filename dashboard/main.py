@@ -7,6 +7,7 @@ Sprint 6:
 - Issue #56: Dashboard login/authentication flow.
 - Issue #52: Candidate list with search and filters.
 - Issue #54: Job description creation UI.
+- Issue #53: Ranking results and evidence drill-down.
 
 Ejecución:
     py -m streamlit run dashboard/main.py
@@ -23,6 +24,7 @@ from dashboard.candidate_filters import (
     filtrar_candidatos,
     preparar_tabla,
 )
+from dashboard.rankings_page import mostrar_rankings
 
 
 # ---------------------------------------------------------
@@ -75,6 +77,8 @@ def cerrar_sesion():
     """Elimina los datos de autenticación de la sesión actual."""
     st.session_state["access_token"] = None
     st.session_state["recruiter_email"] = None
+    st.session_state.pop("ranking_resultado", None)
+    st.session_state.pop("ranking_plantilla_id", None)
 
 
 def mostrar_login():
@@ -390,15 +394,12 @@ elif pagina == "Candidatos":
 
 
 # ---------------------------------------------------------
-# Rankings
+# Rankings - Issue #53
 # ---------------------------------------------------------
 
 elif pagina == "Rankings":
-    st.title("Rankings")
-
-    st.info(
-        "La visualización de rankings y evidencias "
-        "se implementará en el Issue #53."
+    mostrar_rankings(
+        st.session_state["access_token"]
     )
 
 
@@ -417,10 +418,6 @@ elif pagina == "Vacantes":
     tab_crear, tab_consultar = st.tabs(
         ["Crear vacante", "Plantillas guardadas"]
     )
-
-    # -----------------------------------------------------
-    # Crear vacante
-    # -----------------------------------------------------
 
     with tab_crear:
         st.subheader("Nueva plantilla de vacante")
@@ -515,10 +512,6 @@ elif pagina == "Vacantes":
                         "El servidor no confirmó "
                         "el guardado de la plantilla."
                     )
-
-    # -----------------------------------------------------
-    # Consultar plantillas
-    # -----------------------------------------------------
 
     with tab_consultar:
         st.subheader("Plantillas guardadas")

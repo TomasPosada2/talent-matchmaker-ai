@@ -25,6 +25,7 @@ from dashboard.candidate_filters import (
     preparar_tabla,
 )
 from dashboard.rankings_page import mostrar_rankings
+from dashboard.analytics import mostrar_analitica
 from dashboard.notifications import (
     crear_notificacion,
     contar_no_leidas,
@@ -185,6 +186,7 @@ with st.sidebar:
             "Candidatos",
             "Rankings",
             "Vacantes",
+            "Analítica",
             "Notificaciones",
         ],
     )
@@ -637,6 +639,11 @@ elif pagina == "Vacantes":
 # ---------------------------------------------------------
 # Notificaciones
 # ---------------------------------------------------------
+
+elif pagina == "Analítica":
+    mostrar_analitica(
+        st.session_state["access_token"]
+    )
 
 elif pagina == "Notificaciones":
     st.title("Notificaciones")

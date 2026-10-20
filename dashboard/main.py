@@ -5,6 +5,7 @@ Dashboard de reclutamiento - Talent Matchmaker AI.
 Sprint 6:
 - Issue #12: Dashboard for recruiters.
 - Issue #56: Dashboard login/authentication flow.
+- Issue #52: Candidate list with search and filters.
 
 Ejecución:
     py -m streamlit run dashboard/main.py
@@ -13,7 +14,15 @@ Ejecución:
 import streamlit as st
 
 from dashboard.api_client import consultar_api, iniciar_sesion
+from dashboard.candidate_filters import (
+    filtrar_candidatos,
+    preparar_tabla,
+)
 
+
+# ---------------------------------------------------------
+# Configuración general
+# ---------------------------------------------------------
 
 st.set_page_config(
     page_title="Talent Matchmaker AI | Dashboard",
@@ -21,7 +30,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
 
 st.markdown(
     """
@@ -47,6 +55,10 @@ st.markdown(
 )
 
 
+# ---------------------------------------------------------
+# Estado de autenticación
+# ---------------------------------------------------------
+
 if "access_token" not in st.session_state:
     st.session_state["access_token"] = None
 
@@ -64,6 +76,7 @@ def mostrar_login():
     """Muestra el formulario de autenticación."""
     st.title("Talent Matchmaker AI")
     st.subheader("Iniciar sesión")
+
     st.write(
         "Ingresa tus credenciales para acceder "
         "al panel de reclutamiento."
@@ -188,8 +201,10 @@ if pagina == "Inicio":
 
     if error:
         st.error(error)
+
     elif estado and estado.get("status") == "ok":
         st.success("API conectada y funcionando.")
+
     else:
         st.warning(
             "No fue posible confirmar el estado de la API."
@@ -258,13 +273,15 @@ if pagina == "Inicio":
 
 
 # ---------------------------------------------------------
-# Candidatos
+# Candidatos - Issue #52
 # ---------------------------------------------------------
 
 elif pagina == "Candidatos":
     st.title("Candidatos")
+
     st.write(
-        "Consulta de perfiles registrados en el sistema."
+        "Consulta los perfiles registrados y utiliza "
+        "los filtros para encontrar candidatos."
     )
 
     resultado, error = consultar_api(
@@ -275,21 +292,107 @@ elif pagina == "Candidatos":
     if error:
         st.error(error)
 
-    elif resultado:
+    elif isinstance(resultado, dict):
         perfiles = resultado.get("profiles", [])
 
+        if not isinstance(perfiles, list):
+            st.error(
+                "El servidor devolvió un formato "
+                "de perfiles inválido."
+            )
+            st.stop()
+
+        # Indicadores generales
         st.metric(
-            "Total de candidatos",
+            "Total de candidatos registrados",
             len(perfiles),
         )
 
-        if perfiles:
-            st.dataframe(
-                perfiles,
-                use_container_width=True,
+        st.divider()
+
+        # Filtros
+        st.subheader("Buscar candidatos")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            nombre = st.text_input(
+                "Nombre",
+                placeholder="Ej. María González",
+                key="filtro_nombre",
             )
+
+        with col2:
+            habilidad = st.text_input(
+                "Habilidades",
+                placeholder="Ej. Python, Excel, SQL",
+                key="filtro_habilidad",
+            )
+
+        with col3:
+            experiencia = st.text_input(
+                "Experiencia",
+                placeholder="Ej. ventas, desarrollo, logística",
+                key="filtro_experiencia",
+            )
+
+        # Aplicación de filtros
+        candidatos_filtrados = filtrar_candidatos(
+            perfiles,
+            nombre=nombre,
+            habilidad=habilidad,
+            experiencia=experiencia,
+        )
+
+        st.divider()
+
+        # Resultados
+        st.subheader("Resultados")
+
+        col_resultados, col_total = st.columns(2)
+
+        col_resultados.metric(
+            "Candidatos encontrados",
+            len(candidatos_filtrados),
+        )
+
+        col_total.metric(
+            "Candidatos disponibles",
+            len(perfiles),
+        )
+
+        if candidatos_filtrados:
+            tabla = preparar_tabla(
+                candidatos_filtrados
+            )
+
+            st.dataframe(
+                tabla,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.caption(
+                "Los resultados se actualizan "
+                "automáticamente al modificar los filtros."
+            )
+
+        elif perfiles:
+            st.info(
+                "No se encontraron candidatos que "
+                "coincidan con los filtros seleccionados."
+            )
+
         else:
-            st.info("No hay candidatos registrados.")
+            st.info(
+                "Todavía no hay candidatos registrados "
+                "en el sistema."
+            )
+
+    else:
+        st.warning(
+            "No fue posible obtener la lista de candidatos."
+        )
 
 
 # ---------------------------------------------------------
@@ -298,6 +401,7 @@ elif pagina == "Candidatos":
 
 elif pagina == "Rankings":
     st.title("Rankings")
+
     st.info(
         "La visualización de rankings y evidencias "
         "se implementará en el Issue #53."
@@ -310,6 +414,7 @@ elif pagina == "Rankings":
 
 elif pagina == "Vacantes":
     st.title("Vacantes")
+
     st.info(
         "La interfaz para crear vacantes "
         "se implementará en el Issue #54."
@@ -322,6 +427,7 @@ elif pagina == "Vacantes":
 
 elif pagina == "Notificaciones":
     st.title("Notificaciones")
+
     st.info(
         "El centro de notificaciones "
         "se implementará en el Issue #57."

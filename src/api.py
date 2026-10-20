@@ -153,6 +153,39 @@ def login_recruiter(
 
 
 # ============================================================
+# Usuario actual y administración
+# ============================================================
+
+@app.get("/auth/me")
+def obtener_mi_usuario(
+    recruiter: dict = Depends(auth.obtener_recruiter_actual),
+):
+    return {
+        "id": recruiter["id"],
+        "email": recruiter["email"],
+        "role": recruiter["role"],
+    }
+
+
+@app.get("/admin/users")
+def listar_usuarios_admin(
+    admin: dict = Depends(auth.requerir_admin),
+):
+    try:
+        usuarios = auth.listar_recruiters_admin()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="No fue posible consultar los usuarios.",
+        ) from exc
+
+    return {
+        "total": len(usuarios),
+        "users": usuarios,
+    }
+
+
+# ============================================================
 # Profiles protegidos
 # ============================================================
 

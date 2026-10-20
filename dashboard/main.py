@@ -6,6 +6,7 @@ Sprint 6:
 - Issue #12: Dashboard for recruiters.
 - Issue #56: Dashboard login/authentication flow.
 - Issue #52: Candidate list with search and filters.
+- Issue #54: Job description creation UI.
 
 Ejecución:
     py -m streamlit run dashboard/main.py
@@ -13,7 +14,11 @@ Ejecución:
 
 import streamlit as st
 
-from dashboard.api_client import consultar_api, iniciar_sesion
+from dashboard.api_client import (
+    consultar_api,
+    enviar_api,
+    iniciar_sesion,
+)
 from dashboard.candidate_filters import (
     filtrar_candidatos,
     preparar_tabla,
@@ -267,8 +272,7 @@ if pagina == "Inicio":
     with c3:
         st.info(
             "**Vacantes**\n\n"
-            "Gestiona descripciones y plantillas "
-            "reutilizables."
+            "Crea y consulta plantillas de vacantes."
         )
 
 
@@ -302,15 +306,12 @@ elif pagina == "Candidatos":
             )
             st.stop()
 
-        # Indicadores generales
         st.metric(
             "Total de candidatos registrados",
             len(perfiles),
         )
 
         st.divider()
-
-        # Filtros
         st.subheader("Buscar candidatos")
 
         col1, col2, col3 = st.columns(3)
@@ -336,7 +337,6 @@ elif pagina == "Candidatos":
                 key="filtro_experiencia",
             )
 
-        # Aplicación de filtros
         candidatos_filtrados = filtrar_candidatos(
             perfiles,
             nombre=nombre,
@@ -345,8 +345,6 @@ elif pagina == "Candidatos":
         )
 
         st.divider()
-
-        # Resultados
         st.subheader("Resultados")
 
         col_resultados, col_total = st.columns(2)
@@ -362,12 +360,8 @@ elif pagina == "Candidatos":
         )
 
         if candidatos_filtrados:
-            tabla = preparar_tabla(
-                candidatos_filtrados
-            )
-
             st.dataframe(
-                tabla,
+                preparar_tabla(candidatos_filtrados),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -409,16 +403,215 @@ elif pagina == "Rankings":
 
 
 # ---------------------------------------------------------
-# Vacantes
+# Vacantes - Issue #54
 # ---------------------------------------------------------
 
 elif pagina == "Vacantes":
     st.title("Vacantes")
 
-    st.info(
-        "La interfaz para crear vacantes "
-        "se implementará en el Issue #54."
+    st.write(
+        "Crea descripciones estructuradas de vacantes "
+        "y guarda plantillas para reutilizarlas."
     )
+
+    tab_crear, tab_consultar = st.tabs(
+        ["Crear vacante", "Plantillas guardadas"]
+    )
+
+    # -----------------------------------------------------
+    # Crear vacante
+    # -----------------------------------------------------
+
+    with tab_crear:
+        st.subheader("Nueva plantilla de vacante")
+
+        with st.form("formulario_vacante", clear_on_submit=True):
+            nombre_plantilla = st.text_input(
+                "Nombre de la plantilla",
+                placeholder="Ej. Analista de datos - Medellín",
+            )
+
+            cargo = st.text_input(
+                "Cargo",
+                placeholder="Ej. Analista de datos",
+            )
+
+            requisitos_texto = st.text_area(
+                "Requisitos del cargo",
+                placeholder=(
+                    "Escribe un requisito por línea:\n"
+                    "Experiencia en Python\n"
+                    "Conocimiento de SQL\n"
+                    "Manejo de Power BI"
+                ),
+                height=180,
+            )
+
+            st.caption(
+                "Cada línea se guardará como un requisito "
+                "independiente. No se agregarán requisitos "
+                "que no hayas escrito."
+            )
+
+            guardar = st.form_submit_button(
+                "Guardar plantilla",
+                use_container_width=True,
+            )
+
+        if guardar:
+            nombre_limpio = nombre_plantilla.strip()
+            cargo_limpio = cargo.strip()
+
+            requisitos = [
+                linea.strip()
+                for linea in requisitos_texto.splitlines()
+                if linea.strip()
+            ]
+
+            if not nombre_limpio:
+                st.warning(
+                    "Debes ingresar un nombre para la plantilla."
+                )
+
+            elif not cargo_limpio:
+                st.warning(
+                    "Debes indicar el cargo de la vacante."
+                )
+
+            elif not requisitos:
+                st.warning(
+                    "Debes ingresar al menos un requisito."
+                )
+
+            else:
+                datos = {
+                    "nombre": nombre_limpio,
+                    "vacante": {
+                        "cargo": cargo_limpio,
+                        "requisitos": requisitos,
+                    },
+                }
+
+                with st.spinner("Guardando plantilla..."):
+                    respuesta, error = enviar_api(
+                        "/job-templates",
+                        datos,
+                        st.session_state["access_token"],
+                    )
+
+                if error:
+                    st.error(error)
+
+                elif respuesta:
+                    st.success(
+                        "La plantilla de vacante "
+                        "se guardó correctamente."
+                    )
+
+                    st.json(respuesta)
+
+                else:
+                    st.warning(
+                        "El servidor no confirmó "
+                        "el guardado de la plantilla."
+                    )
+
+    # -----------------------------------------------------
+    # Consultar plantillas
+    # -----------------------------------------------------
+
+    with tab_consultar:
+        st.subheader("Plantillas guardadas")
+
+        if st.button(
+            "Actualizar lista",
+            key="actualizar_plantillas",
+        ):
+            st.rerun()
+
+        resultado, error = consultar_api(
+            "/job-templates",
+            st.session_state["access_token"],
+        )
+
+        if error:
+            st.error(error)
+
+        elif isinstance(resultado, dict):
+            plantillas = resultado.get("templates", [])
+
+            if not isinstance(plantillas, list):
+                st.error(
+                    "El servidor devolvió un formato "
+                    "de plantillas inválido."
+                )
+
+            else:
+                st.metric(
+                    "Plantillas registradas",
+                    len(plantillas),
+                )
+
+                if not plantillas:
+                    st.info(
+                        "Todavía no tienes plantillas "
+                        "de vacantes guardadas."
+                    )
+
+                else:
+                    for plantilla in plantillas:
+                        if not isinstance(plantilla, dict):
+                            continue
+
+                        nombre = plantilla.get(
+                            "nombre",
+                            "Plantilla sin nombre",
+                        )
+
+                        identificador = plantilla.get("id")
+                        vacante = plantilla.get("vacante") or {}
+
+                        if not isinstance(vacante, dict):
+                            vacante = {}
+
+                        cargo_guardado = vacante.get(
+                            "cargo",
+                            "No especificado",
+                        )
+
+                        requisitos_guardados = vacante.get(
+                            "requisitos",
+                            [],
+                        )
+
+                        if not isinstance(requisitos_guardados, list):
+                            requisitos_guardados = []
+
+                        with st.expander(
+                            f"{nombre} — {cargo_guardado}"
+                        ):
+                            st.write(
+                                f"**ID:** {identificador}"
+                            )
+
+                            st.write(
+                                f"**Cargo:** {cargo_guardado}"
+                            )
+
+                            st.write("**Requisitos:**")
+
+                            if requisitos_guardados:
+                                for requisito in requisitos_guardados:
+                                    st.write(f"- {requisito}")
+                            else:
+                                st.caption(
+                                    "Sin requisitos registrados."
+                                )
+
+        else:
+            st.warning(
+                "No fue posible consultar las plantillas."
+            )
 
 
 # ---------------------------------------------------------

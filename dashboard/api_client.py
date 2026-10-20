@@ -1,6 +1,11 @@
 
 """
 Cliente HTTP para conectar el dashboard con FastAPI.
+
+Sprint 6:
+- Autenticación de recruiters.
+- Consultas GET a la API.
+- Creación de plantillas de vacantes mediante POST.
 """
 
 import os
@@ -34,6 +39,40 @@ def consultar_api(ruta: str, token: str | None = None):
         return None, (
             f"Error HTTP {exc.response.status_code} "
             "al consultar la API."
+        )
+
+    except (httpx.RequestError, ValueError):
+        return None, (
+            "No fue posible conectar con FastAPI "
+            "o interpretar su respuesta."
+        )
+
+
+def enviar_api(
+    ruta: str,
+    datos: dict,
+    token: str | None = None,
+):
+    """Envía un POST a FastAPI y devuelve (datos, error)."""
+    headers = {}
+
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        response = httpx.post(
+            f"{API_URL}{ruta}",
+            json=datos,
+            headers=headers,
+            timeout=15,
+        )
+        response.raise_for_status()
+        return response.json(), None
+
+    except httpx.HTTPStatusError as exc:
+        return None, (
+            f"Error HTTP {exc.response.status_code} "
+            "al guardar la información."
         )
 
     except (httpx.RequestError, ValueError):

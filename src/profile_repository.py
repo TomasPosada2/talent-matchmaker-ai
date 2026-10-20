@@ -179,3 +179,34 @@ def contar_perfiles() -> int:
             fila = cursor.fetchone()
 
     return int(fila["total"])
+
+def eliminar_perfil(email_id: str) -> bool:
+    """
+    Sprint 7 - #63: borra un perfil (derecho de supresión).
+
+    Devuelve True si existía.
+    """
+    consulta = "DELETE FROM profiles WHERE email_id = %s;"
+
+    with obtener_conexion() as conexion:
+        with conexion.cursor() as cursor:
+            cursor.execute(consulta, (email_id,))
+            return cursor.rowcount > 0
+
+
+def eliminar_perfiles_anteriores_a(dias: int) -> list[str]:
+    """
+    Sprint 7 - #63: borra los perfiles sin actualizar en más de ``dias``.
+
+    Devuelve los email_id eliminados.
+    """
+    consulta = """
+        DELETE FROM profiles
+        WHERE updated_at < CURRENT_TIMESTAMP - make_interval(days => %s)
+        RETURNING email_id;
+    """
+
+    with obtener_conexion() as conexion:
+        with conexion.cursor() as cursor:
+            cursor.execute(consulta, (dias,))
+            return [fila[0] for fila in cursor.fetchall()]

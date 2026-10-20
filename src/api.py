@@ -9,6 +9,7 @@ from src import (
     auth,
     email_notifier,
     job_template_repository,
+    privacy,
     profile_repository,
 )
 
@@ -285,6 +286,52 @@ def obtener_perfil(
     return perfil
 
 
+@app.delete("/profiles/{email_id}")
+def eliminar_perfil(
+    email_id: str,
+    admin: dict = Depends(auth.requerir_admin),
+):
+    """
+    Sprint 7 - #63: derecho de supresión (Ley 1581 de 2012).
+
+    Borra el perfil de la base de datos y las copias del CV en disco.
+    """
+    try:
+        existia = profile_repository.eliminar_perfil(email_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="No fue posible eliminar el perfil.",
+        ) from exc
+
+    try:
+        archivos = privacy.eliminar_archivos_candidato(email_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Identificador de perfil inválido.",
+        ) from exc
+
+    if not existia and archivos == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="Perfil no encontrado.",
+        )
+
+    logger.info(
+        "Perfil %s eliminado por %s (archivos borrados: %d).",
+        email_id,
+        privacy.enmascarar_email(admin.get("email")),
+        archivos,
+    )
+
+    return {
+        "email_id": email_id,
+        "perfil_eliminado": existia,
+        "archivos_eliminados": archivos,
+    }
+
+
 # ============================================================
 # Job templates protegidos
 # ============================================================
@@ -438,7 +485,7 @@ def generar_ranking(
         logger.exception(
             "El ranking terminó correctamente, pero no fue "
             "posible notificar al recruiter %s: %s",
-            recruiter.get("email"),
+            privacy.enmascarar_email(recruiter.get("email")),
             exc,
         )
 

@@ -12,6 +12,7 @@ from email.message import EmailMessage
 from googleapiclient.discovery import build
 
 from .gmail_auth import obtener_credenciales_gmail
+from .privacy import enmascarar_email
 
 logger = logging.getLogger("email_notifier")
 
@@ -84,7 +85,7 @@ def enviar_notificacion_ranking(
 
     logger.info(
         "Notificación de ranking enviada a %s. message_id=%s",
-        destinatario,
+        enmascarar_email(destinatario),
         message_id,
     )
 

@@ -57,7 +57,7 @@ El registro no es público (#61). Hay dos formas de crear cuentas:
 docker compose run --rm api python scripts/create_admin.py admin@empresa.com
 ```
 
-Después, un admin crea recruiters desde el dashboard (sección **Usuarios**)
+Después, un admin crea recruiters desde el dashboard (sección **Administración**)
 o con `POST /auth/register`.
 
 ## 3. Gmail (opcional)

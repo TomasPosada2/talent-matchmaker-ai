@@ -10,6 +10,7 @@ from dashboard.ranking_view import (
     preparar_ranking,
     preparar_resumen,
 )
+from dashboard.ui_style import mostrar_tabla
 from src.demo_ranking import generar_ranking_demo
 
 
@@ -288,7 +289,7 @@ def mostrar_rankings(token: str):
 
     st.divider()
 
-    st.subheader(
+    st.header(
         "Resultados del ranking"
     )
 
@@ -309,17 +310,13 @@ def mostrar_rankings(token: str):
         len(ranking),
     )
 
-    st.dataframe(
-        preparar_resumen(ranking),
-        use_container_width=True,
-        hide_index=True,
-    )
+    mostrar_tabla(preparar_resumen(ranking))
 
     # -----------------------------------------------------
     # Evidencias por candidato
     # -----------------------------------------------------
 
-    st.subheader(
+    st.header(
         "Evidencias por candidato"
     )
 

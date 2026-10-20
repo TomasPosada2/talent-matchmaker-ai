@@ -2,7 +2,6 @@ from fastapi.testclient import TestClient
 
 from src import api
 
-
 client = TestClient(api.app)
 
 
@@ -294,7 +293,52 @@ def test_error_del_agente(monkeypatch):
     limpiar_autenticacion()
 
 
+def admin_autenticado():
+    return {
+        "id": 99,
+        "email": "admin@example.com",
+        "role": "admin",
+    }
+
+
+def activar_admin():
+    api.app.dependency_overrides[
+        api.auth.obtener_recruiter_actual
+    ] = admin_autenticado
+
+
+def test_registro_requiere_autenticacion():
+    limpiar_autenticacion()
+
+    response = client.post(
+        "/auth/register",
+        json={
+            "email": "intruso@example.com",
+            "password": "Password123!",
+        },
+    )
+
+    assert response.status_code in (401, 403)
+
+
+def test_registro_rechaza_recruiter_sin_rol_admin():
+    activar_autenticacion()
+
+    try:
+        response = client.post(
+            "/auth/register",
+            json={
+                "email": "nuevo@example.com",
+                "password": "Password123!",
+            },
+        )
+        assert response.status_code == 403
+    finally:
+        limpiar_autenticacion()
+
+
 def test_registrar_recruiter(monkeypatch):
+    activar_admin()
     monkeypatch.setattr(
         api.auth,
         "crear_tabla_recruiters",
@@ -310,19 +354,22 @@ def test_registrar_recruiter(monkeypatch):
     monkeypatch.setattr(
         api.auth,
         "crear_recruiter",
-        lambda email, password: {
+        lambda email, password, role="recruiter": {
             "id": 1,
             "email": email,
         },
     )
 
-    response = client.post(
-        "/auth/register",
-        json={
-            "email": "recruiter@example.com",
-            "password": "Password123!",
-        },
-    )
+    try:
+        response = client.post(
+            "/auth/register",
+            json={
+                "email": "recruiter@example.com",
+                "password": "Password123!",
+            },
+        )
+    finally:
+        limpiar_autenticacion()
 
     assert response.status_code == 201
     assert response.json() == {
@@ -332,6 +379,7 @@ def test_registrar_recruiter(monkeypatch):
 
 
 def test_recruiter_duplicado(monkeypatch):
+    activar_admin()
     monkeypatch.setattr(
         api.auth,
         "crear_tabla_recruiters",
@@ -347,13 +395,16 @@ def test_recruiter_duplicado(monkeypatch):
         },
     )
 
-    response = client.post(
-        "/auth/register",
-        json={
-            "email": "recruiter@example.com",
-            "password": "Password123!",
-        },
-    )
+    try:
+        response = client.post(
+            "/auth/register",
+            json={
+                "email": "recruiter@example.com",
+                "password": "Password123!",
+            },
+        )
+    finally:
+        limpiar_autenticacion()
 
     assert response.status_code == 409
 
@@ -434,6 +485,26 @@ def test_login_password_incorrecto(monkeypatch):
     )
 
     assert response.status_code == 401
+
+
+def test_login_bloqueado_tras_intentos_fallidos(monkeypatch):
+    monkeypatch.setattr(api.auth, "crear_tabla_recruiters", lambda: None)
+    monkeypatch.setattr(api.auth, "obtener_recruiter_por_email", lambda email: None)
+
+    datos = {"email": "fuerza-bruta@example.com", "password": "incorrecta"}
+
+    for _ in range(api.auth.MAX_INTENTOS_FALLIDOS):
+        assert client.post("/auth/login", json=datos).status_code == 401
+
+    assert client.post("/auth/login", json=datos).status_code == 429
+
+
+def test_respuestas_incluyen_cabeceras_de_seguridad():
+    response = client.get("/health")
+
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-Frame-Options"] == "DENY"
+
 
 def test_ranking_notifica_al_recruiter(monkeypatch):
     activar_autenticacion()

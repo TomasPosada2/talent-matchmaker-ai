@@ -1,6 +1,10 @@
 import logging
+import os
+import time
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
 from src import (
@@ -8,11 +12,18 @@ from src import (
     auth,
     email_notifier,
     job_template_repository,
+    observability,
+    privacy,
     profile_repository,
 )
 
-
+observability.configurar_logging()
 logger = logging.getLogger("api")
+
+
+def _docs_habilitados() -> bool:
+    """Swagger/OpenAPI solo se expone si ENABLE_API_DOCS lo permite."""
+    return os.getenv("ENABLE_API_DOCS", "true").lower() in ("1", "true", "yes")
 
 
 app = FastAPI(
@@ -22,7 +33,80 @@ app = FastAPI(
         "rankings de candidatos."
     ),
     version="1.0.0",
+    docs_url="/docs" if _docs_habilitados() else None,
+    redoc_url="/redoc" if _docs_habilitados() else None,
+    openapi_url="/openapi.json" if _docs_habilitados() else None,
 )
+
+
+# Sprint 7 - #61: cabeceras de seguridad (A05 Security Misconfiguration).
+CABECERAS_SEGURIDAD = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",
+}
+
+
+@app.middleware("http")
+async def agregar_cabeceras_seguridad(request: Request, call_next):
+    response = await call_next(request)
+    for nombre, valor in CABECERAS_SEGURIDAD.items():
+        response.headers.setdefault(nombre, valor)
+    return response
+
+
+# Sprint 7 - #66: métricas, log por petición y alertas de errores/latencia.
+# Se registra después del middleware de cabeceras, así que lo envuelve y
+# también mide las respuestas de error.
+@app.middleware("http")
+async def medir_peticiones(request: Request, call_next):
+    inicio = time.perf_counter()
+
+    try:
+        response = await call_next(request)
+        status = response.status_code
+    except Exception:
+        logger.exception("Error no controlado en %s %s", request.method, request.url.path)
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": "Error interno del servidor."},
+        )
+        status = 500
+
+    duracion = time.perf_counter() - inicio
+    ruta = request.scope.get("route")
+    plantilla = getattr(ruta, "path", "sin_ruta")
+
+    observability.PETICIONES_HTTP.labels(
+        method=request.method, route=plantilla, status=str(status)
+    ).inc()
+    observability.LATENCIA_HTTP.labels(
+        method=request.method, route=plantilla
+    ).observe(duracion)
+
+    logger.info(
+        "%s %s -> %d (%.0f ms)",
+        request.method,
+        plantilla,
+        status,
+        duracion * 1000,
+    )
+
+    if status >= 500:
+        observability.alertar(
+            "error_api",
+            f"{request.method} {plantilla} respondió {status}.",
+            clave=f"error_api:{request.method}:{plantilla}",
+        )
+    elif duracion > observability.umbral_peticion_lenta_segundos():
+        observability.alertar(
+            "latencia_api",
+            f"{request.method} {plantilla} tardó {duracion:.1f} s.",
+            clave=f"latencia_api:{request.method}:{plantilla}",
+        )
+
+    return response
 
 
 # ============================================================
@@ -41,6 +125,10 @@ class RecruiterRegisterRequest(BaseModel):
     password: str = Field(
         ...,
         min_length=8,
+    )
+    role: str = Field(
+        "recruiter",
+        pattern="^(recruiter|admin)$",
     )
 
 
@@ -72,6 +160,42 @@ def health():
     }
 
 
+@app.get("/health/ready")
+def health_ready():
+    """
+    Sprint 7 - #66: verifica dependencias (PostgreSQL).
+
+    /health solo dice que el proceso responde; /health/ready dice si
+    puede atender peticiones reales. Docker y el monitoreo usan este.
+    """
+    try:
+        with profile_repository.obtener_conexion() as conexion:
+            with conexion.cursor() as cursor:
+                cursor.execute("SELECT 1")
+    except Exception:
+        logger.exception("Health check: PostgreSQL no disponible.")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "database": "unavailable"},
+        )
+
+    return {"status": "ok", "database": "ok"}
+
+
+@app.get("/metrics", include_in_schema=False)
+def metricas(request: Request):
+    """
+    Métricas en formato Prometheus.
+
+    Si METRICS_TOKEN está definido, exige ``Authorization: Bearer <token>``.
+    """
+    token = os.getenv("METRICS_TOKEN")
+    if token and request.headers.get("Authorization") != f"Bearer {token}":
+        raise HTTPException(status_code=401, detail="No autorizado.")
+
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 # ============================================================
 # Authentication
 # ============================================================
@@ -79,7 +203,11 @@ def health():
 @app.post("/auth/register", status_code=201)
 def registrar_recruiter(
     request: RecruiterRegisterRequest,
+    admin: dict = Depends(auth.requerir_admin),
 ):
+    # Sprint 7 - #61: solo un admin puede crear cuentas. Antes el registro
+    # era público y cualquiera podía crear una cuenta y leer los CVs.
+    # El primer admin se crea con scripts/create_admin.py.
     try:
         auth.crear_tabla_recruiters()
 
@@ -96,6 +224,7 @@ def registrar_recruiter(
         recruiter = auth.crear_recruiter(
             request.email,
             request.password,
+            request.role,
         )
 
     except HTTPException:
@@ -114,6 +243,15 @@ def registrar_recruiter(
 def login_recruiter(
     request: RecruiterLoginRequest,
 ):
+    if auth.login_bloqueado(request.email):
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Demasiados intentos fallidos. "
+                "Intenta de nuevo más tarde."
+            ),
+        )
+
     try:
         auth.crear_tabla_recruiters()
 
@@ -128,6 +266,8 @@ def login_recruiter(
         ) from exc
 
     if recruiter is None:
+        auth.verificar_password_ficticio(request.password)
+        auth.registrar_login_fallido(request.email)
         raise HTTPException(
             status_code=401,
             detail="Credenciales inválidas.",
@@ -137,10 +277,13 @@ def login_recruiter(
         request.password,
         recruiter["password_hash"],
     ):
+        auth.registrar_login_fallido(request.email)
         raise HTTPException(
             status_code=401,
             detail="Credenciales inválidas.",
         )
+
+    auth.limpiar_intentos_login(request.email)
 
     token = auth.crear_access_token(
         recruiter["email"]
@@ -235,6 +378,52 @@ def obtener_perfil(
         )
 
     return perfil
+
+
+@app.delete("/profiles/{email_id}")
+def eliminar_perfil(
+    email_id: str,
+    admin: dict = Depends(auth.requerir_admin),
+):
+    """
+    Sprint 7 - #63: derecho de supresión (Ley 1581 de 2012).
+
+    Borra el perfil de la base de datos y las copias del CV en disco.
+    """
+    try:
+        existia = profile_repository.eliminar_perfil(email_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="No fue posible eliminar el perfil.",
+        ) from exc
+
+    try:
+        archivos = privacy.eliminar_archivos_candidato(email_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Identificador de perfil inválido.",
+        ) from exc
+
+    if not existia and archivos == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="Perfil no encontrado.",
+        )
+
+    logger.info(
+        "Perfil %s eliminado por %s (archivos borrados: %d).",
+        email_id,
+        privacy.enmascarar_email(admin.get("email")),
+        archivos,
+    )
+
+    return {
+        "email_id": email_id,
+        "perfil_eliminado": existia,
+        "archivos_eliminados": archivos,
+    }
 
 
 # ============================================================
@@ -390,7 +579,7 @@ def generar_ranking(
         logger.exception(
             "El ranking terminó correctamente, pero no fue "
             "posible notificar al recruiter %s: %s",
-            recruiter.get("email"),
+            privacy.enmascarar_email(recruiter.get("email")),
             exc,
         )
 

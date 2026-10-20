@@ -1,0 +1,37 @@
+# Reglas de alerta de Prometheus para Talent Matchmaker AI (Sprint 7 - #66).
+# Se cargan desde monitoring/prometheus.yml (perfil "monitoring" de docker compose).
+groups:
+  - name: talent-matchmaker
+    rules:
+      - alert: APIErrores5xx
+        expr: sum(rate(tm_http_requests_total{status=~"5.."}[5m])) / sum(rate(tm_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Más del 5% de las peticiones a la API terminan en error 5xx."
+
+      - alert: APILatenciaAlta
+        # Excluye /rankings: el ranking con IA tarda por diseño (ver SLOW_REQUEST_SECONDS).
+        expr: histogram_quantile(0.95, sum by (le) (rate(tm_http_request_duration_seconds_bucket{route!="/rankings"}[5m]))) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "El p95 de latencia de la API supera 2 s."
+
+      - alert: RankingLento
+        expr: histogram_quantile(0.95, sum by (le) (rate(tm_http_request_duration_seconds_bucket{route="/rankings"}[30m]))) > 120
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "El p95 de los rankings con IA supera 2 minutos."
+
+      - alert: APICaida
+        expr: up{job="talent-matchmaker-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus no puede leer las métricas de la API."

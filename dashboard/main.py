@@ -9,13 +9,18 @@ Sprint 6:
 - Issue #54: Job description creation UI.
 - Issue #53: Ranking results and evidence drill-down.
 
+Sprint 7:
+- Issue #59: accesibilidad (tablas accesibles, idioma, títulos, mensajes).
+- Issues #61/#63: administración de cuentas y supresión de datos.
+
 Ejecución:
     py -m streamlit run dashboard/main.py
 """
 
 import streamlit as st
-from dashboard.ui_style import aplicar_estilos
 
+from dashboard.admin_page import mostrar_administracion
+from dashboard.analytics import mostrar_analitica
 from dashboard.api_client import (
     consultar_api,
     enviar_api,
@@ -25,15 +30,14 @@ from dashboard.candidate_filters import (
     filtrar_candidatos,
     preparar_tabla,
 )
-from dashboard.rankings_page import mostrar_rankings
-from dashboard.analytics import mostrar_analitica
 from dashboard.notifications import (
-    crear_notificacion,
     contar_no_leidas,
-    marcar_todas_leidas,
+    crear_notificacion,
     limpiar_notificaciones,
+    marcar_todas_leidas,
 )
-
+from dashboard.rankings_page import mostrar_rankings
+from dashboard.ui_style import aplicar_estilos, mostrar_tabla
 
 # ---------------------------------------------------------
 # Configuración general
@@ -61,11 +65,15 @@ if "access_token" not in st.session_state:
 if "recruiter_email" not in st.session_state:
     st.session_state["recruiter_email"] = None
 
+if "recruiter_role" not in st.session_state:
+    st.session_state["recruiter_role"] = None
+
 
 def cerrar_sesion():
     """Elimina los datos de autenticación de la sesión actual."""
     st.session_state["access_token"] = None
     st.session_state["recruiter_email"] = None
+    st.session_state["recruiter_role"] = None
     st.session_state["notificaciones"] = []
     st.session_state.pop("ranking_resultado", None)
     st.session_state.pop("ranking_plantilla_id", None)
@@ -74,7 +82,7 @@ def cerrar_sesion():
 def mostrar_login():
     """Muestra el formulario de autenticación."""
     st.title("Talent Matchmaker AI")
-    st.subheader("Iniciar sesión")
+    st.header("Iniciar sesión")
 
     st.write(
         "Ingresa tus credenciales para acceder "
@@ -97,7 +105,7 @@ def mostrar_login():
 
             enviar = st.form_submit_button(
                 "Iniciar sesión",
-                use_container_width=True,
+                width="stretch",
             )
 
         if enviar:
@@ -132,6 +140,11 @@ def mostrar_login():
             st.session_state["access_token"] = token
             st.session_state["recruiter_email"] = correo.strip()
 
+            usuario, _ = consultar_api("/auth/me", token)
+            st.session_state["recruiter_role"] = (
+                usuario.get("role") if isinstance(usuario, dict) else None
+            )
+
             st.rerun()
 
 
@@ -158,17 +171,19 @@ with st.sidebar:
 
     st.divider()
 
-    pagina = st.radio(
-        "Navegación",
-        [
-            "Inicio",
-            "Candidatos",
-            "Rankings",
-            "Vacantes",
-            "Analítica",
-            "Notificaciones",
-        ],
-    )
+    paginas = [
+        "Inicio",
+        "Candidatos",
+        "Rankings",
+        "Vacantes",
+        "Analítica",
+        "Notificaciones",
+    ]
+
+    if st.session_state["recruiter_role"] == "admin":
+        paginas.append("Administración")
+
+    pagina = st.radio("Navegación", paginas)
 
     pendientes = contar_no_leidas(
         st.session_state["notificaciones"]
@@ -180,14 +195,25 @@ with st.sidebar:
 
     st.divider()
 
+    st.toggle(
+        "Tablas accesibles",
+        key="tablas_accesibles",
+        help=(
+            "Muestra las tablas como HTML simple, "
+            "compatible con lectores de pantalla."
+        ),
+    )
+
+    st.divider()
+
     if st.button(
         "Cerrar sesión",
-        use_container_width=True,
+        width="stretch",
     ):
         cerrar_sesion()
         st.rerun()
 
-    st.caption("Sprint 6 · Dashboard v1")
+    st.caption("Dashboard v1.1")
 
 
 # ---------------------------------------------------------
@@ -203,7 +229,7 @@ if pagina == "Inicio":
         "a las herramientas de reclutamiento."
     )
 
-    st.subheader("Estado del sistema")
+    st.header("Estado del sistema")
 
     estado, error = consultar_api("/health")
 
@@ -241,8 +267,25 @@ if pagina == "Inicio":
         ),
     )
 
-    col2.metric("Rankings generados", "—")
-    col3.metric("Vacantes activas", "—")
+    plantillas, _ = consultar_api(
+        "/job-templates",
+        st.session_state["access_token"],
+    )
+
+    total_vacantes = (
+        plantillas.get("total")
+        if isinstance(plantillas, dict)
+        else None
+    )
+
+    col2.metric(
+        "Vacantes guardadas",
+        total_vacantes if total_vacantes is not None else "—",
+    )
+    col3.metric(
+        "Notificaciones sin leer",
+        contar_no_leidas(st.session_state["notificaciones"]),
+    )
 
     if error_perfiles:
         st.warning(
@@ -250,12 +293,7 @@ if pagina == "Inicio":
             "Verifica que tu sesión siga siendo válida."
         )
 
-    st.caption(
-        "Los indicadores sin datos se habilitarán "
-        "cuando sus funcionalidades estén disponibles."
-    )
-
-    st.subheader("Herramientas disponibles")
+    st.header("Herramientas disponibles")
 
     c1, c2, c3 = st.columns(3)
 
@@ -315,7 +353,7 @@ elif pagina == "Candidatos":
         )
 
         st.divider()
-        st.subheader("Buscar candidatos")
+        st.header("Buscar candidatos")
 
         col1, col2, col3 = st.columns(3)
 
@@ -348,7 +386,7 @@ elif pagina == "Candidatos":
         )
 
         st.divider()
-        st.subheader("Resultados")
+        st.header("Resultados")
 
         col_resultados, col_total = st.columns(2)
 
@@ -363,11 +401,7 @@ elif pagina == "Candidatos":
         )
 
         if candidatos_filtrados:
-            st.dataframe(
-                preparar_tabla(candidatos_filtrados),
-                use_container_width=True,
-                hide_index=True,
-            )
+            mostrar_tabla(preparar_tabla(candidatos_filtrados))
 
             st.caption(
                 "Los resultados se actualizan "
@@ -419,7 +453,7 @@ elif pagina == "Vacantes":
     )
 
     with tab_crear:
-        st.subheader("Nueva plantilla de vacante")
+        st.header("Nueva plantilla de vacante")
 
         with st.form("formulario_vacante", clear_on_submit=True):
             nombre_plantilla = st.text_input(
@@ -451,7 +485,7 @@ elif pagina == "Vacantes":
 
             guardar = st.form_submit_button(
                 "Guardar plantilla",
-                use_container_width=True,
+                width="stretch",
             )
 
         if guardar:
@@ -522,7 +556,7 @@ elif pagina == "Vacantes":
                     )
 
     with tab_consultar:
-        st.subheader("Plantillas guardadas")
+        st.header("Plantillas guardadas")
 
         if st.button(
             "Actualizar lista",
@@ -621,6 +655,11 @@ elif pagina == "Vacantes":
 
 elif pagina == "Analítica":
     mostrar_analitica(
+        st.session_state["access_token"]
+    )
+
+elif pagina == "Administración":
+    mostrar_administracion(
         st.session_state["access_token"]
     )
 

@@ -12,7 +12,6 @@ from src.ranking_exporter import (
     exportar_ranking_pdf,
 )
 
-
 RANKING_PRUEBA = [
     {
         "email_id": "candidato_medio",

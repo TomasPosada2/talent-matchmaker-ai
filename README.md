@@ -1,154 +1,117 @@
-# Talent Matchmaker AI — Sprint 1
+# Talent Matchmaker AI
 
-Implementación del **Sprint 1** del proyecto *Talent Matchmaker AI*.
+Sistema de preselección de candidatos. Lee las hojas de vida que llegan por
+correo, extrae un perfil estructurado donde **cada dato apunta a la evidencia
+textual del CV** y compara a los candidatos contra una vacante con un
+ranking que se justifica línea por línea.
 
-**Meta del sprint:** demostrar que el sistema detecta un correo con CV adjunto,
-extrae el texto y devuelve un perfil estructurado en JSON donde cada campo
-apunta a la evidencia textual de origen, sobre un lote de prueba de 20 hojas
-de vida. **No incluye ranking** — sin ingesta ni parsing confiables, el
-matching es humo.
+Principio del producto: ningún dato se inventa. Si no está en el CV, queda
+en `null`, y si un requisito no tiene evidencia, el ranking lo declara.
 
-## Arquitectura (mapeada a las historias de usuario)
+Equipo: Tomás Posada · Mateo Arango · Sara Jaramillo.
 
-```
-Bandeja simulada (carpeta local)
-        │
-        ▼
-HU-01  email_detector.py       → detecta correos con adjunto CV válido
-        │
-        ▼
-HU-02  attachment_handler.py   → valida y extrae el adjunto (tamaño, corrupción)
-        │
-        ▼
-HU-03  text_extractor.py       → extrae texto de PDF/DOCX en orden
-        │
-        ▼
-HU-04/05 profile_structurer.py → estructura campos + evidencia textual
-        │
-        ▼
-HU-06  schema.py                → valida el JSON contra un esquema fijo
-        │
-        ▼
-HU-07  pipeline.py (procesar_lote) → corre todo sobre el lote, mide tasa de éxito
-        │
-HU-08  manejo de errores integrado en cada etapa (no se cae el lote completo)
-```
-
-## Por qué "bandeja simulada" y no Gmail/IMAP real
-
-Para el Sprint 1 se decidió simular la bandeja como una carpeta local
-(`data/inbox_simulado/`), donde cada subcarpeta representa un correo con su
-`metadata.json` (remitente, asunto, adjuntos) y los archivos adjuntos reales.
-Esto permite validar el pipeline completo end-to-end sin depender de
-credenciales de correo real. La interfaz de `email_detector.py` está aislada
-para que, en un sprint futuro, solo haya que reemplazar cómo se listan los
-"correos" (ej. usando la API de Gmail o IMAP) sin tocar el resto del pipeline.
-
-## Estructura del proyecto
+## Cómo funciona
 
 ```
-talent_matchmaker/
-├── src/
-│   ├── email_detector.py       # HU-01
-│   ├── attachment_handler.py   # HU-02
-│   ├── text_extractor.py       # HU-03
-│   ├── profile_structurer.py   # HU-04, HU-05
-│   ├── schema.py                # HU-06
-│   └── pipeline.py              # HU-07, HU-08 (orquestador)
-├── scripts/
-│   └── generate_sample_inbox.py # genera 25 correos de prueba (20 CVs válidos + 5 casos borde)
-├── tests/
-│   └── test_pipeline.py         # 9 pruebas unitarias
-├── data/
-│   ├── inbox_simulado/          # se genera al correr el script
-│   └── salida/                  # reporte_lote.json y perfiles.json
-├── run_batch.py                 # punto de entrada
-└── requirements.txt
+Gmail ──► Listener ──► ClamAV ──► Extracción ──► Perfil + evidencia ──► PostgreSQL
+                                  (PDF/DOCX/OCR)    (schema validado)          │
+                                                                               ▼
+              Dashboard (Streamlit) ◄──── API REST (FastAPI + JWT) ◄──── Agente de ranking
+              login, candidatos,                                          (Claude + tools que
+              vacantes, rankings,                                          verifican evidencia)
+              analítica, administración
 ```
 
-## Instalación
+El detalle de cada componente está en [docs/architecture.md](docs/architecture.md).
+
+## Inicio rápido (Docker)
+
+Requisitos: Docker con Compose v2 y unos 4 GB de RAM libres.
 
 ```bash
-pip install -r requirements.txt
+cp .env.example .env        # completa POSTGRES_PASSWORD, JWT_SECRET y DEMO_ADMIN_PASSWORD
+docker compose up -d --build
+docker compose run --rm api python scripts/seed_demo.py
 ```
 
-## Uso
+Abre http://localhost:8501 e inicia sesión con `DEMO_ADMIN_EMAIL` /
+`DEMO_ADMIN_PASSWORD`. El script de demostración procesa 25 correos
+sintéticos (20 de 21 CVs válidos quedan registrados) y crea una vacante de
+ejemplo. En **Rankings**, el modo *Demostración gratuita* funciona sin llave
+de Claude; el modo IA necesita `ANTHROPIC_API_KEY`.
 
-### 1. Generar la bandeja simulada de prueba (20 CVs + 5 casos borde)
+Gmail real, HTTPS en producción, backups y diagnóstico: ver
+[docs/runbook.md](docs/runbook.md).
+
+## Desarrollo local
+
+Requiere Python 3.11 o superior.
 
 ```bash
-python scripts/generate_sample_inbox.py
+python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt -c constraints.txt
+ruff check .
+pytest -q
 ```
 
-Genera CVs sintéticos (datos ficticios vía Faker) en 4 plantillas distintas,
-más casos borde: 2 correos sin adjunto, 2 con formato no soportado (.jpg),
-1 con un .docx vacío.
-
-### 2. Correr el pipeline completo (HU-07)
+Las pruebas no necesitan PostgreSQL, ClamAV ni red: usan dobles de prueba.
+Para correr los servicios fuera de Docker, define `DATABASE_URL`,
+`JWT_SECRET` (mínimo 32 caracteres) y, si quieres, `CLAMAV_HOST`, y luego:
 
 ```bash
-python run_batch.py
+uvicorn src.api:app --reload                  # API en :8000 (Swagger en /docs)
+streamlit run dashboard/main.py               # dashboard en :8501
+python run_listener.py                        # listener de Gmail
 ```
 
-Imprime en consola el reporte de la corrida y guarda:
-- `data/salida/reporte_lote.json` — métricas + detalle de fallos
-- `data/salida/perfiles.json` — todos los perfiles estructurados válidos
-- `data/salida/adjuntos_extraidos/` — copia trazable de cada adjunto procesado
+Cada pull request pasa por CI (`.github/workflows/ci.yml`): ruff, pytest,
+`pip-audit` y la construcción de la imagen Docker.
 
-### 3. Correr las pruebas unitarias
+## Estructura
 
-```bash
-pip install pytest
-python -m pytest tests/ -v
+```
+src/
+  pipeline.py, email_detector.py, gmail_inbox.py, email_polling.py   ingesta
+  attachment_handler.py, malware_scanner.py, text_extractor.py       adjuntos, ClamAV, PDF/DOCX/OCR
+  profile_structurer.py, schema.py                                   perfil con evidencia
+  vacancy_structurer.py, agent.py, agent_tools.py, demo_ranking.py   ranking (IA y demostración)
+  api.py, auth.py                                                    API REST, JWT y roles
+  profile_repository.py, job_template_repository.py                  PostgreSQL
+  observability.py, privacy.py                                       métricas, alertas, PII
+  ranking_exporter.py, email_notifier.py                             exportación y notificaciones
+dashboard/                                                           Streamlit
+scripts/                                                             demo, carga, admin, purga, backups
+tests/                                                               pytest
+docs/                                                                documentación
+monitoring/, deploy/                                                 Prometheus y Caddy
 ```
 
-## Resultado de referencia sobre el lote de prueba
+## Documentación
 
-Con la bandeja generada por `generate_sample_inbox.py` (25 correos: 20 CVs
-válidos + 5 casos borde), el pipeline reporta:
+| Documento | Contenido |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | Componentes, flujo de datos, modelo de datos y decisiones de diseño |
+| [docs/runbook.md](docs/runbook.md) | Despliegue, operación, backups y recuperación |
+| [docs/monitoring.md](docs/monitoring.md) | Métricas, alertas, health checks y logs |
+| [docs/security-review.md](docs/security-review.md) | Revisión OWASP Top 10 |
+| [docs/privacy.md](docs/privacy.md) | Datos personales, retención y derechos del titular |
+| [docs/accessibility.md](docs/accessibility.md) | Auditoría WCAG 2.1 AA del dashboard |
+| [docs/performance.md](docs/performance.md) | Pruebas de carga y límites de escala |
+| [docs/uat-plan.md](docs/uat-plan.md) | Plan de pruebas de aceptación con reclutadores |
+| [docs/retrospective.md](docs/retrospective.md) | Retrospectiva del proyecto y traspaso |
+| [SPRINT_REVIEW.md](SPRINT_REVIEW.md) | Product Goal, Sprint Goals y backlog por sprint |
 
-- **20/20** CVs válidos procesados con éxito (tasa de éxito sobre candidatos: ~95%,
-  ya que se incluye a propósito 1 caso borde adicional — un .docx vacío — que
-  falla de forma controlada, sin tumbar el resto del lote).
-- 2 correos ignorados por no tener adjunto.
-- 2 correos descartados por formato no soportado (.jpg).
+## Limitaciones conocidas
 
-## Formato de salida (schema fijo, ver `src/schema.py`)
-
-```json
-{
-  "email_id": "email_001",
-  "archivo_origen": "email_001__cv_1.docx",
-  "nombre": {"valor": "María Torres", "evidencia": "María Torres"},
-  "contacto": {
-    "email": {"valor": "maria@example.com", "evidencia": "maria@example.com"},
-    "telefono": {"valor": "3001234567", "evidencia": "3001234567"}
-  },
-  "educacion": {"valor": null, "evidencia": null},
-  "experiencia": {"valor": "...", "evidencia": "..."},
-  "habilidades": {"valor": "...", "evidencia": "..."}
-}
-```
-
-Principio clave: si un campo no está presente en el texto del CV, queda en
-`null`. El sistema **nunca inventa información** ni evidencia que no exista
-literalmente en el documento origen.
-
-## Extracción de campos: enfoque del Sprint 1
-
-La estructuración (HU-04/HU-05) usa **reglas y expresiones regulares**
-(detección de encabezados de sección + regex para email/teléfono), no un LLM.
-Esto es intencional para el Sprint 1: primero se valida que la ingesta y el
-parsing sean confiables y trazables sobre datos reales/sintéticos antes de
-invertir en matching o ranking (que quedan fuera de este sprint, según la
-meta definida).
-
-## Limitaciones conocidas (para backlog de sprints futuros)
-
-- No hay soporte de OCR: un CV escaneado como imagen se marca "no procesable"
-  (HU-08), no se descarta el pipeline pero tampoco se extrae su contenido.
-- La heurística de "nombre" (primera línea válida) puede fallar con plantillas
-  de CV muy atípicas.
-- No hay conexión a correo real (Gmail/IMAP) todavía — queda para un sprint
-  posterior si el negocio lo requiere.
-- No incluye ranking ni matching semántico (fuera del alcance de este sprint).
+- `GET /profiles` devuelve todos los perfiles: hay que paginarlo antes de
+  llegar a unos 5.000 candidatos ([docs/performance.md](docs/performance.md)).
+- El ranking con IA es síncrono y no tiene cuota por usuario
+  ([docs/security-review.md](docs/security-review.md), A04).
+- La exportación de rankings a CSV/PDF (`src/ranking_exporter.py`, #42)
+  existe como librería, pero todavía no está expuesta en la API ni en el
+  dashboard.
+- La analítica (#58) muestra habilidades y puntajes; el *time-to-hire* y el
+  embudo de contratación necesitan registrar el estado de cada candidato en
+  el proceso, y hoy ese dato no existe.
+- Falta el aviso de privacidad para candidatos, que requiere revisión legal
+  ([docs/privacy.md](docs/privacy.md)).

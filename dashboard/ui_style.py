@@ -3,7 +3,6 @@
 
 import streamlit as st
 
-
 ESTILOS = """
 <style>
 /* Diseño general */
@@ -33,6 +32,11 @@ a:focus-visible,
 [role="radio"]:focus-visible {
     outline: 3px solid #2563eb !important;
     outline-offset: 3px;
+}
+
+/* Jerarquía de títulos: las secciones son h2 (st.header) */
+h2 {
+    font-size: 1.5rem !important;
 }
 
 /* Mejor legibilidad */
@@ -89,9 +93,37 @@ a:focus-visible,
 """
 
 
+# Streamlit declara la página como lang="en"; los lectores de pantalla
+# leerían el español con pronunciación inglesa (WCAG 3.1.1).
+FIJAR_IDIOMA = """
+<script>
+window.parent.document.documentElement.lang = "es";
+</script>
+"""
+
+
 def aplicar_estilos():
     """Aplica estilos visuales al dashboard."""
     st.markdown(
         ESTILOS,
         unsafe_allow_html=True,
     )
+    st.iframe(FIJAR_IDIOMA, height=1)
+
+
+def mostrar_tabla(filas: list[dict]) -> None:
+    """
+    Muestra una tabla de datos.
+
+    st.dataframe se dibuja en un canvas que los lectores de pantalla no
+    pueden recorrer. Con la opción "Tablas accesibles" del menú lateral se
+    usa st.table, que genera una tabla HTML semántica (WCAG 1.3.1).
+    """
+    if st.session_state.get("tablas_accesibles"):
+        st.table(filas)
+    else:
+        st.dataframe(
+            filas,
+            width="stretch",
+            hide_index=True,
+        )

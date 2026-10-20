@@ -5,7 +5,6 @@ Golden-set regression tests for ranking quality.
 
 from src import agent_tools, schema
 from src.agent import _agregar_confianza_ranking
-
 from tests.golden_set import (
     ORDEN_ESPERADO,
     PERFILES_GOLDEN,

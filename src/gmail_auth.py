@@ -1,9 +1,9 @@
+import os
 from pathlib import Path
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -11,8 +11,12 @@ SCOPES = [
 ]
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-CREDENTIALS_PATH = ROOT_DIR / "credentials.json"
-TOKEN_PATH = ROOT_DIR / "token.json"
+
+# Sprint 7 - #65: en Docker las credenciales se montan como secretos.
+CREDENTIALS_PATH = Path(
+    os.getenv("GMAIL_CREDENTIALS_PATH", ROOT_DIR / "credentials.json")
+)
+TOKEN_PATH = Path(os.getenv("GMAIL_TOKEN_PATH", ROOT_DIR / "token.json"))
 
 
 def obtener_credenciales_gmail() -> Credentials:

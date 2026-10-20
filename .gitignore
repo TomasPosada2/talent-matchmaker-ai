@@ -23,3 +23,5 @@ Thumbs.db
 credentials.json
 token.json
 secrets/
+# Backups locales de docker compose
+backups/

@@ -1,0 +1,25 @@
+[project]
+name = "talent-matchmaker-ai"
+version = "1.0.0"
+description = "Ingesta trazable de CVs y ranking explicable de candidatos."
+requires-python = ">=3.11"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = ["data"]
+
+[tool.ruff.lint]
+# Errores de sintaxis/nombres (E, F), bugs comunes (B) e imports ordenados (I).
+select = ["E", "F", "B", "I"]
+ignore = [
+    "E501",  # las cadenas largas en español se dejan legibles
+    "B008",  # FastAPI usa Depends(...) como valor por defecto
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "dashboard", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

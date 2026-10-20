@@ -1,7 +1,23 @@
 
 """Preparación de resultados de ranking para el dashboard."""
 
+import re
 from collections.abc import Mapping
+
+# Caracteres con significado en el Markdown de Streamlit (incluye $ de LaTeX
+# y : de los emojis/colores con nombre).
+_MARKDOWN_ESPECIAL = re.compile(r"([\\`*_{}\[\]()#+\-.!|<>~$:])")
+
+
+def escapar_markdown(texto) -> str:
+    """
+    Neutraliza el Markdown en texto que proviene de un CV o del LLM.
+
+    Sprint 7 - #61 (A03 Injection): sin esto, un CV con
+    ``![x](https://sitio-externo/pixel)`` o ``[clic](https://phishing)``
+    se renderizaba como imagen o enlace en la vista del recruiter.
+    """
+    return _MARKDOWN_ESPECIAL.sub(r"\\\1", str(texto))
 
 
 def preparar_ranking(ranking: list) -> list[dict]:

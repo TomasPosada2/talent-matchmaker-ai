@@ -11,6 +11,7 @@ from dashboard.candidate_filters import (
     obtener_valor,
 )
 from dashboard.ranking_view import preparar_ranking
+from dashboard.ui_style import mostrar_tabla
 
 
 def calcular_habilidades(perfiles: list[dict]) -> list[dict]:
@@ -119,7 +120,7 @@ def mostrar_analitica(token: str):
         st.error("Formato de vacantes inválido.")
         return
 
-    st.subheader("Indicadores generales")
+    st.header("Indicadores generales")
 
     col1, col2 = st.columns(2)
 
@@ -135,7 +136,7 @@ def mostrar_analitica(token: str):
 
     st.divider()
 
-    st.subheader("Habilidades frecuentes")
+    st.header("Habilidades frecuentes")
 
     habilidades = calcular_habilidades(perfiles)
 
@@ -147,11 +148,8 @@ def mostrar_analitica(token: str):
             horizontal=True,
         )
 
-        st.dataframe(
-            habilidades,
-            use_container_width=True,
-            hide_index=True,
-        )
+        # Alternativa textual del gráfico (WCAG 1.1.1).
+        mostrar_tabla(habilidades)
     else:
         st.info(
             "No hay suficientes habilidades "
@@ -160,7 +158,7 @@ def mostrar_analitica(token: str):
 
     st.divider()
 
-    st.subheader("Último ranking de la sesión")
+    st.header("Último ranking de la sesión")
 
     datos = st.session_state.get("ranking_resultado")
 
@@ -215,6 +213,9 @@ def mostrar_analitica(token: str):
             x="Candidato",
             y="Puntaje",
         )
+
+        # Alternativa textual del gráfico (WCAG 1.1.1).
+        mostrar_tabla(tabla)
 
     st.caption(
         "Los indicadores del ranking corresponden "

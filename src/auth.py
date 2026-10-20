@@ -1,5 +1,18 @@
+"""
+Autenticación de recruiters (Sprint 5 - #49) y roles (Sprint 6 - #55).
+
+Sprint 7 - #61 (revisión OWASP):
+- JWT_SECRET debe tener al menos 32 caracteres (A02 Cryptographic Failures).
+- Límite de intentos fallidos de login por correo (A07 Identification and
+  Authentication Failures).
+- El login verifica un hash ficticio cuando el correo no existe, para no
+  revelar por tiempo de respuesta qué cuentas están registradas.
+"""
 
 import os
+import threading
+import time
+from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -9,13 +22,23 @@ from pwdlib import PasswordHash
 
 from src import profile_repository
 
-
 ALGORITHM = "HS256"
 TOKEN_EXPIRATION_MINUTES = 60
 ROLES_VALIDOS = {"recruiter", "admin"}
+LONGITUD_MINIMA_SECRET = 32
+
+MAX_INTENTOS_FALLIDOS = 5
+VENTANA_INTENTOS_SEGUNDOS = 15 * 60
 
 password_hash = PasswordHash.recommended()
 security = HTTPBearer()
+
+# Hash de una contraseña aleatoria: se verifica contra él cuando el correo
+# no existe, para que el tiempo de respuesta no delate cuentas registradas.
+_HASH_FICTICIO = password_hash.hash(os.urandom(16).hex())
+
+_intentos_fallidos: dict[str, deque] = defaultdict(deque)
+_lock_intentos = threading.Lock()
 
 
 def obtener_jwt_secret() -> str:
@@ -24,7 +47,52 @@ def obtener_jwt_secret() -> str:
         raise RuntimeError(
             "La variable de entorno JWT_SECRET no está configurada."
         )
+    if len(secret) < LONGITUD_MINIMA_SECRET:
+        raise RuntimeError(
+            f"JWT_SECRET debe tener al menos {LONGITUD_MINIMA_SECRET} "
+            "caracteres."
+        )
     return secret
+
+
+def _clave_intentos(email: str) -> str:
+    return email.lower().strip()
+
+
+def _purgar_intentos(intentos: deque, ahora: float) -> None:
+    while intentos and ahora - intentos[0] > VENTANA_INTENTOS_SEGUNDOS:
+        intentos.popleft()
+
+
+def login_bloqueado(email: str) -> bool:
+    """True si el correo superó el máximo de intentos fallidos recientes."""
+    ahora = time.monotonic()
+    with _lock_intentos:
+        intentos = _intentos_fallidos[_clave_intentos(email)]
+        _purgar_intentos(intentos, ahora)
+        return len(intentos) >= MAX_INTENTOS_FALLIDOS
+
+
+def registrar_login_fallido(email: str) -> None:
+    ahora = time.monotonic()
+    with _lock_intentos:
+        intentos = _intentos_fallidos[_clave_intentos(email)]
+        _purgar_intentos(intentos, ahora)
+        intentos.append(ahora)
+
+
+def limpiar_intentos_login(email: str | None = None) -> None:
+    """Reinicia el contador tras un login exitoso (o todos, en pruebas)."""
+    with _lock_intentos:
+        if email is None:
+            _intentos_fallidos.clear()
+        else:
+            _intentos_fallidos.pop(_clave_intentos(email), None)
+
+
+def verificar_password_ficticio(password: str) -> None:
+    """Gasta el mismo tiempo que un login real cuando el correo no existe."""
+    password_hash.verify(password, _HASH_FICTICIO)
 
 
 def crear_tabla_recruiters() -> None:
@@ -72,7 +140,14 @@ def verificar_password(password: str, hashed_password: str) -> bool:
     return password_hash.verify(password, hashed_password)
 
 
-def crear_recruiter(email: str, password: str) -> dict:
+def crear_recruiter(
+    email: str,
+    password: str,
+    role: str = "recruiter",
+) -> dict:
+    if role not in ROLES_VALIDOS:
+        raise ValueError(f"Rol no válido: {role}")
+
     hashed = hash_password(password)
 
     with profile_repository.obtener_conexion() as conn:
@@ -80,10 +155,10 @@ def crear_recruiter(email: str, password: str) -> dict:
             cursor.execute(
                 """
                 INSERT INTO recruiters (email, password_hash, role)
-                VALUES (%s, %s, 'recruiter')
+                VALUES (%s, %s, %s)
                 RETURNING id, email
                 """,
-                (email.lower().strip(), hashed),
+                (email.lower().strip(), hashed, role),
             )
             row = cursor.fetchone()
         conn.commit()

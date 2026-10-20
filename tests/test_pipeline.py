@@ -5,12 +5,15 @@ Ejecutar con: pytest tests/ -v   (desde la raíz del proyecto)
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from docx import Document
 
-from src import email_detector, attachment_handler, text_extractor, profile_structurer, schema
+from src import attachment_handler, email_detector, profile_structurer, schema, text_extractor
+from src.profile_structurer import _extraer_nombre
+from src.text_extractor import extraer_texto
 
 
 def test_deteccion_correo_sin_adjunto(tmp_path):
@@ -102,8 +105,6 @@ def test_perfil_invalido_es_rechazado():
 # Sprint 4 - HU-16
 # More robust name heuristic for atypical CV templates
 # ============================================================
-
-from src.profile_structurer import _extraer_nombre
 
 
 def test_hu16_nombre_despues_de_titulo_cv():
@@ -207,10 +208,6 @@ def test_hu16_no_inventa_nombre_sin_candidato_valido():
 # Sprint 4 - HU-15
 # OCR support for scanned image CVs
 # ============================================================
-
-from unittest.mock import patch
-
-from src.text_extractor import extraer_texto
 
 
 def test_hu15_pdf_sin_texto_activa_ocr(tmp_path):

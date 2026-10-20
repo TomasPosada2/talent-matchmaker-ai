@@ -20,7 +20,7 @@ correos, no el resto del pipeline).
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger("email_detector")

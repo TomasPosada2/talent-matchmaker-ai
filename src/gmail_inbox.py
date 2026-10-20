@@ -4,9 +4,8 @@ from pathlib import Path
 
 from googleapiclient.discovery import build
 
-from .email_detector import CorreoDetectado, FORMATOS_SOPORTADOS
+from .email_detector import FORMATOS_SOPORTADOS, CorreoDetectado
 from .gmail_auth import obtener_credenciales_gmail
-
 
 logger = logging.getLogger("gmail_inbox")
 

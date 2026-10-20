@@ -134,18 +134,18 @@ de matching sobre datos con estos defectos propagaría el error.
 | ID | Historia | Prioridad | Estado |
 |---|---|---|---|
 | HU-01…08 | Ingesta, extracción y estructuración trazable de CVs | — | Hecho · Sprint 1 |
-| BUG-01 | Orden de tablas en DOCX rompe secciones (experiencia se pierde) | Alta | Backlog priorizado |
-| BUG-02 | Regex de teléfono confunde rangos de años con números | Alta | Backlog priorizado |
-| HU-09 | Estructurar la vacante (job description) como input del agente | Alta | Backlog priorizado |
-| HU-10 | Tool: consultar los perfiles estructurados del Sprint 1 | Alta | Backlog priorizado |
-| HU-11 | Tool: verificar si un requisito tiene evidencia real en el perfil | Alta | Backlog priorizado |
-| HU-12 | Agent loop (Thought → Action → Observation) con límite de pasos | Alta | Backlog priorizado |
-| HU-13 | Ranking final justificado con evidencia citada por candidato | Alta | Backlog priorizado |
-| HU-14 | Manejo de errores del agente (tool falla, LLM alucina un requisito) | Media | Backlog priorizado |
-| HU-15 | OCR para CVs escaneados como imagen | Media | Backlog futuro |
-| HU-16 | Heurística de nombre más robusta ante plantillas atípicas | Media | Backlog futuro |
-| HU-17 | Conexión real a bandeja de correo (Gmail/IMAP) | Baja | Backlog futuro |
-| HU-18 | Panel/dashboard para reclutadores | Baja | Backlog futuro |
+| BUG-01 | Orden de tablas en DOCX rompe secciones (experiencia se pierde) | Alta | Hecho · Sprint 3 |
+| BUG-02 | Regex de teléfono confunde rangos de años con números | Alta | Hecho · Sprint 3 |
+| HU-09 | Estructurar la vacante (job description) como input del agente | Alta | Hecho · Sprint 3 |
+| HU-10 | Tool: consultar los perfiles estructurados del Sprint 1 | Alta | Hecho · Sprint 3 |
+| HU-11 | Tool: verificar si un requisito tiene evidencia real en el perfil | Alta | Hecho · Sprint 3 |
+| HU-12 | Agent loop (Thought → Action → Observation) con límite de pasos | Alta | Hecho · Sprint 3 |
+| HU-13 | Ranking final justificado con evidencia citada por candidato | Alta | Hecho · Sprint 3 |
+| HU-14 | Manejo de errores del agente (tool falla, LLM alucina un requisito) | Media | Hecho · Sprint 3 |
+| HU-15 | OCR para CVs escaneados como imagen | Media | Hecho · Sprint 4 |
+| HU-16 | Heurística de nombre más robusta ante plantillas atípicas | Media | Hecho · Sprint 4 |
+| HU-17 | Conexión real a bandeja de correo (Gmail/IMAP) | Baja | Hecho · Sprint 5 |
+| HU-18 | Panel/dashboard para reclutadores | Baja | Hecho · Sprint 6 |
 
 ## Sprint 3 — Sprint Goal (inicia)
 
@@ -157,3 +157,42 @@ la misma evidencia textual que ya exige Sprint 1, siguiendo el patrón de
 
 Arranca directo del backlog priorizado: BUG-01 y BUG-02 se cierran primero,
 antes de construir matching sobre datos incorrectos.
+
+## Sprints 4 a 6 — resumen
+
+| Sprint | Sprint Goal | Entregado |
+|---|---|---|
+| 4 | Robustez y calidad del ranking | OCR (HU-15), heurística de nombre (HU-16), reintentos con backoff (#35), costo de tokens (#36), logging del agente (#37), golden set (#38), defensa contra prompt injection (#39), confianza por decisión (#40), varias vacantes en una corrida (#41), exportación CSV/PDF (#42). 62 pruebas. |
+| 5 | Integración, seguridad y automatización | PostgreSQL (#46, #47), API REST (#48) con JWT (#49), Gmail OAuth (#43, HU-17) y listener (#44), ClamAV (#45), notificación por correo (#50), plantillas de vacante (#51). 138 pruebas. |
+| 6 | Experiencia del recruiter | Dashboard (HU-18) con login (#56), roles (#55), filtros (#52), creación de vacantes (#54), ranking con evidencia y modo demostración (#53), notificaciones (#57), analítica (#58) y diseño responsive (#60). 174 pruebas. |
+
+## Sprint 7 — Sprint Goal (cerrado)
+
+> "Dejar el sistema listo para operar con datos reales: integración continua,
+> desplegable con un comando, seguro, respetuoso de los datos personales,
+> monitoreado, recuperable ante desastres y documentado para el traspaso."
+
+**Definition of Done**
+
+- [x] CI en cada PR: ruff, pytest, pip-audit y build de Docker (#64)
+- [x] `docker compose up` levanta todo; HTTPS con Caddy para producción (#65)
+- [x] Revisión OWASP Top 10, con hallazgos corregidos y probados (#61)
+- [x] Retención, derecho de supresión y enmascarado de PII (#63)
+- [x] Métricas, health checks y alertas por webhook (#66)
+- [x] Backups diarios verificados y simulacro de restauración (#67)
+- [x] Pruebas de carga del pipeline y la API (#62)
+- [x] Auditoría de accesibilidad pendiente del Sprint 6 (#59)
+- [x] README, arquitectura y runbook (#69)
+- [~] UAT con reclutadores reales: plan listo, falta ejecutar las sesiones (#68)
+- [~] Retrospectiva: borrador listo, falta la reunión del equipo (#70)
+
+**Resultados verificados (2026-10-20, stack completo en Docker)**
+
+```
+seed_demo.py           20/21 CVs procesados (95,2 %) con ClamAV y PostgreSQL reales
+load_test.py           500 CVs en 65,6 s (≈ 455 CVs/min), 0 fallos, p95 144 ms por CV
+restore.sh             13 → 20 perfiles restaurados en 2 s
+pytest                 215 pruebas en verde
+```
+
+Documentación: [README.md](README.md) y la carpeta [docs/](docs/).

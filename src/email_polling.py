@@ -9,9 +9,9 @@ import json
 import logging
 from pathlib import Path
 
+from . import observability
 from .gmail_inbox import obtener_correos_gmail
 from .pipeline import procesar_lote
-
 
 logger = logging.getLogger("email_polling")
 
@@ -125,6 +125,7 @@ def ejecutar_listener(
     ruta_estado: Path,
     intervalo_segundos: int = 60,
     max_resultados: int = 50,
+    ruta_heartbeat: Path | None = None,
 ) -> None:
     """
     Mantiene un listener activo consultando Gmail periódicamente.
@@ -148,10 +149,22 @@ def ejecutar_listener(
                     ruta_estado=ruta_estado,
                     max_resultados=max_resultados,
                 )
-            except Exception:
+                if ruta_heartbeat:
+                    observability.escribir_heartbeat(ruta_heartbeat, "ok")
+            except Exception as exc:
                 logger.exception(
                     "Error durante el ciclo de polling de Gmail."
                 )
+                # Sprint 7 - #66: el listener corre sin supervisión humana.
+                observability.alertar(
+                    "listener_gmail",
+                    f"Falló el ciclo de polling de Gmail: {exc}",
+                    clave="listener_gmail",
+                )
+                if ruta_heartbeat:
+                    observability.escribir_heartbeat(
+                        ruta_heartbeat, "error", str(exc)
+                    )
 
             time.sleep(intervalo_segundos)
 

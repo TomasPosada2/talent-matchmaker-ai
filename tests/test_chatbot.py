@@ -74,7 +74,12 @@ def mensaje(stop_reason, *bloques):
     return SimpleNamespace(
         stop_reason=stop_reason,
         content=list(bloques),
-        usage=SimpleNamespace(input_tokens=100, output_tokens=20),
+        usage=SimpleNamespace(
+            input_tokens=40,
+            cache_creation_input_tokens=0,
+            cache_read_input_tokens=60,
+            output_tokens=20,
+        ),
     )
 
 

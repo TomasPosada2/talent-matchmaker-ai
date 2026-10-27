@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -98,7 +99,11 @@ No calcules ni inventes un nivel de confianza. El sistema calculará
 automáticamente la confianza después de recibir tu ranking, utilizando
 la proporción de requisitos respaldados por evidencia verificable.
 
-Cuando termines de evaluar a todos los candidatos relevantes, responde
+Incluye en el ranking a TODO candidato para el que verificaste al menos un
+requisito con tiene_evidencia=true, aunque su puntaje sea bajo: no omitas a
+ninguno, porque el recruiter debe ver la lista completa.
+
+Cuando termines de evaluar a los candidatos, responde
 ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
 {"ranking": [{"email_id": "...", "puntaje": 0-100,
   "justificacion": [{"requisito": "...", "evidencia": "..."}],
@@ -607,6 +612,41 @@ def construir_tools(
 
 
 # ============================================================
+# Sprint 8 - #75: lectura tolerante de la respuesta final
+# ============================================================
+
+_BLOQUE_JSON = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+
+def _extraer_json_final(texto: str) -> dict:
+    """
+    Obtiene el objeto JSON de la respuesta final del agente.
+
+    El prompt pide solo JSON, pero con el modelo real la respuesta a veces
+    llega con una frase antes o dentro de un bloque ```json (detectado en
+    la prueba de punta a punta de #75). Se acepta, en orden: JSON puro, el
+    primer bloque de código con JSON, o el texto entre la primera "{" y la
+    última "}". La validación del contenido sigue siendo la misma.
+    """
+    texto = (texto or "").strip()
+
+    try:
+        return json.loads(texto)
+    except json.JSONDecodeError:
+        pass
+
+    bloque = _BLOQUE_JSON.search(texto)
+    if bloque:
+        return json.loads(bloque.group(1))
+
+    inicio, fin = texto.find("{"), texto.rfind("}")
+    if inicio != -1 and fin > inicio:
+        return json.loads(texto[inicio:fin + 1])
+
+    return json.loads(texto)
+
+
+# ============================================================
 # Agent loop
 # ============================================================
 
@@ -792,7 +832,7 @@ async def rankear_candidatos_async(
     # ========================================================
 
     try:
-        respuesta_final = json.loads(
+        respuesta_final = _extraer_json_final(
             texto_final
         )
 

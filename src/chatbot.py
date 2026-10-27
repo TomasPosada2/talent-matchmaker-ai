@@ -495,7 +495,15 @@ def responder(
             cache_control={"type": "ephemeral"},
         )
         resultado.pasos = paso
-        resultado.tokens_entrada += getattr(respuesta.usage, "input_tokens", 0) or 0
+        # input_tokens excluye lo leído o escrito en la caché del prompt.
+        resultado.tokens_entrada += sum(
+            getattr(respuesta.usage, campo, 0) or 0
+            for campo in (
+                "input_tokens",
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+            )
+        )
         resultado.tokens_salida += getattr(respuesta.usage, "output_tokens", 0) or 0
 
         if respuesta.stop_reason == "refusal":

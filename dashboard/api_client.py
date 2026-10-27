@@ -68,6 +68,51 @@ def consultar_api(ruta: str, token: str | None = None):
         )
 
 
+def preguntar_asistente(mensajes: list[dict], token: str):
+    """
+    Envía la conversación a POST /chat y devuelve (datos, error).
+
+    Sprint 8 - #87: una respuesta puede consultar varias herramientas, así
+    que el tiempo de espera es mayor, y el error muestra el motivo exacto
+    que da el servidor (falta de llave, límite diario, etc.).
+    """
+    try:
+        response = httpx.post(
+            f"{API_URL}/chat",
+            json={"mensajes": mensajes},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=120,
+        )
+        response.raise_for_status()
+        return response.json(), None
+
+    except httpx.HTTPStatusError as exc:
+        try:
+            detalle = exc.response.json().get("detail")
+        except ValueError:
+            detalle = None
+
+        if isinstance(detalle, str) and exc.response.status_code != 401:
+            return None, detalle
+
+        return None, _mensaje_error_http(
+            exc.response.status_code,
+            "al consultar el asistente",
+        )
+
+    except httpx.TimeoutException:
+        return None, (
+            "El asistente tardó demasiado en responder. "
+            "Intenta con una pregunta más específica."
+        )
+
+    except (httpx.RequestError, ValueError):
+        return None, (
+            "No fue posible conectar con FastAPI "
+            "o interpretar su respuesta."
+        )
+
+
 def enviar_api(
     ruta: str,
     datos: dict,

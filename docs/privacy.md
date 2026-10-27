@@ -13,6 +13,7 @@ Marco de referencia: Ley 1581 de 2012 (Habeas Data, Colombia) y su Decreto
 | Remitente y asunto del correo | Gmail | Solo en memoria durante el procesamiento | — |
 | Correo y hash Argon2 de la contraseña del recruiter | Alta por un admin | Tabla `recruiters` | Admins (`/admin/users`) |
 | Fragmentos de perfiles enviados al LLM | Ranking con Claude | Anthropic (encargado del tratamiento) | Anthropic, según su política de retención |
+| Preguntas al asistente y los perfiles que consulta para responder | Recruiter (#87) | Solo en la sesión del navegador; el servidor no guarda el historial del chat | Anthropic, igual que el ranking con IA |
 
 ## 2. Controles implementados
 
@@ -30,7 +31,7 @@ Marco de referencia: Ley 1581 de 2012 (Habeas Data, Colombia) y su Decreto
 | Riesgo | Recomendación | Responsable |
 |---|---|---|
 | No hay aviso de privacidad ni autorización del titular. El candidato envía su CV por correo, pero no se le informa la finalidad ni el uso de un proveedor de IA. | Redactar el aviso de privacidad y responder automáticamente a cada correo con él. **Requiere revisión legal.** | Product Owner + asesoría legal |
-| Los perfiles se envían a Anthropic para el ranking con IA (transferencia a un encargado). | Firmar o aceptar el DPA de Anthropic y declararlo en el aviso de privacidad. El modo demostración no envía datos fuera. | Product Owner |
+| Los perfiles se envían a Anthropic para el ranking con IA y para el asistente (transferencia a un encargado). | Firmar o aceptar el DPA de Anthropic y declararlo en el aviso de privacidad. El modo demostración no envía datos fuera. | Product Owner |
 | Cifrado en reposo: depende del disco o volumen donde corre Postgres. | En producción usar un volumen o servicio de base de datos administrado con cifrado en reposo activado. | Operaciones |
 | `reporte_lote.json` duplica los perfiles del último lote en disco. | Queda cubierto por la purga y lo usa la interfaz de prueba `app.py`; eliminarlo cuando se retire esa interfaz. | Equipo |
 | Todos los recruiters ven todos los candidatos. | Aceptado mientras haya un solo equipo de reclutamiento (ver `docs/security-review.md`). | Product Owner |

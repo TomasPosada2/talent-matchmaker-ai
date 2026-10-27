@@ -98,3 +98,6 @@ uvicorn==0.54.0
 watchdog==6.0.0
 websockets==17.3
 prometheus_client==0.26.0
+anthropic==2.3.0
+docstring_parser==0.18.0
+jiter==0.18.0

@@ -24,3 +24,6 @@ google-auth-httplib2>=0.2.0
 google-auth-oauthlib>=1.2.0
 
 prometheus-client>=0.20.0
+
+# Asistente (Sprint 8 - #87)
+anthropic>=2.3.0

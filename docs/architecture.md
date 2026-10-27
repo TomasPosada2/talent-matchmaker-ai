@@ -9,6 +9,7 @@
 | API REST | `src/api.py`, `src/auth.py` | `api` | Autenticación JWT con roles, perfiles, vacantes, rankings, supresión de datos, métricas. |
 | Agente de ranking | `src/agent.py`, `src/agent_tools.py` | Dentro de la API | Compara candidatos contra una vacante con Claude, usando tools que verifican la evidencia. |
 | Ranking de demostración | `src/demo_ranking.py` | Dentro del dashboard | Coincidencia textual determinista: sin IA y sin costo. |
+| Asistente (chatbot) | `src/chatbot.py`, `dashboard/assistant_page.py` | Dentro de la API | Responde preguntas en lenguaje natural con Claude y herramientas de solo lectura sobre los datos (#87). |
 | Dashboard | `dashboard/` | `dashboard` | Interfaz de recruiters y admins. Solo habla con la API. |
 | PostgreSQL | `src/*_repository.py` | `db` | Perfiles, cuentas y plantillas de vacantes. |
 | ClamAV | `src/malware_scanner.py` | `clamav` | Antivirus; el pipeline se comunica con él por la red. |
@@ -60,6 +61,24 @@ CVs, una alerta.
    por requisito y los requisitos sin evidencia. Al terminar se notifica al
    recruiter por correo (#50).
 
+## 3b. Asistente (#87)
+
+`POST /chat` recibe la conversación visible (el servidor no guarda historial)
+y responde con Claude mediante un loop manual de la API de mensajes, con un
+máximo de 6 pasos. Herramientas, todas de solo lectura:
+
+| Herramienta | Qué devuelve |
+|---|---|
+| `buscar_candidatos` | Candidatos cuyo perfil contiene todas las palabras buscadas, con la evidencia de cada coincidencia |
+| `ver_candidato` | Perfil completo con evidencia |
+| `verificar_requisito` | Si un requisito tiene evidencia en el CV (reutiliza `verificar_evidencia`, HU-11) |
+| `listar_vacantes` | Plantillas del recruiter |
+| `estadisticas_candidatos` | Total, habilidades más frecuentes y perfiles con campos vacíos |
+
+El prompt obliga a citar el `email_id` y la evidencia, a decir cuando un dato
+no existe y a no opinar sobre características personales. El modelo se
+configura con `CHAT_MODEL` (vacío = el mismo de `CLAUDE_MODEL`).
+
 ## 4. Modelo de datos
 
 ```
@@ -87,6 +106,7 @@ aditivos (`ADD COLUMN IF NOT EXISTS`).
 | `GET /profiles`, `/profiles/{id}` | | ✓ | ✓ |
 | `/job-templates` (solo las propias) | | ✓ | ✓ |
 | `POST /rankings` | | ✓ | ✓ |
+| `POST /chat`, `GET /chat/status` | | ✓ | ✓ |
 | `POST /auth/register`, `GET /admin/users` | | | ✓ |
 | `DELETE /profiles/{id}` | | | ✓ |
 | `GET /metrics` | ✓ (o con `METRICS_TOKEN`) | | |
@@ -104,5 +124,6 @@ de datos y ClamAV quedan en la red interna de Docker. Ver
 | Perfil completo en JSONB más columnas consultables | Conserva exactamente la estructura validada por el schema y permite filtrar por nombre, correo o teléfono. |
 | Bandeja simulada con la misma interfaz que Gmail | Permitió validar el pipeline sin credenciales desde el Sprint 1 y hoy sirve para pruebas y demos. |
 | ClamAV por red (clamd) en Docker | Las firmas viven en su propio contenedor y se actualizan solas; la imagen de la app sigue siendo liviana. |
+| Asistente con herramientas de solo lectura y loop manual | No puede alterar datos aunque un CV intente manipularlo; el loop manual permite limitar pasos y probarlo sin llamar a la API, igual que el agente de ranking. |
 | Modo demostración sin IA | Permite demos y capacitación sin costo y sin enviar datos personales a terceros. |
 | Una sola imagen Docker para todos los procesos | Un solo artefacto que construir, escanear y versionar. |

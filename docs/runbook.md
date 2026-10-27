@@ -48,6 +48,18 @@ Abre http://localhost:8501 e inicia sesión con `DEMO_ADMIN_EMAIL` /
 `DEMO_ADMIN_PASSWORD`. En **Rankings**, el modo *Demostración gratuita*
 funciona sin `ANTHROPIC_API_KEY`.
 
+### Asistente (chatbot, #87)
+
+El asistente usa Claude, así que necesita una llave de Anthropic:
+
+1. Crea la llave en https://console.anthropic.com (Settings → API Keys).
+2. Pégala en `.env`: `ANTHROPIC_API_KEY=sk-ant-...`
+3. Reinicia la API: `docker compose up -d api`.
+
+La página **Asistente** del dashboard queda activa. Cada recruiter tiene
+`CHAT_DAILY_LIMIT` preguntas al día (100 por defecto). La misma llave
+habilita el ranking con IA.
+
 ### Cuentas de usuario
 
 El registro no es público (#61). Hay dos formas de crear cuentas:
@@ -229,6 +241,8 @@ docker compose exec api python -c "from src.observability import alertar; print(
 | Todos los CVs fallan con "Escaneo de seguridad fallido" | `clamav` caído o descargando firmas | `docker compose logs clamav`; esperar a que quede healthy |
 | `listener` unhealthy | Token de Gmail vencido o revocado | Repetir el paso 2 de la sección 3 |
 | Ranking con IA da error 500 | Falta `ANTHROPIC_API_KEY` o no hay saldo | Revisar `.env`; mientras tanto, usar el modo demostración |
+| El asistente dice que no está activado | Falta `ANTHROPIC_API_KEY` | Sección 2, "Asistente" |
+| Inicio dice "Gmail no está conectado" | El listener no está corriendo o no se autorizó | Sección 3 |
 | Login devuelve 429 | 5 intentos fallidos en 15 minutos | Esperar, o reiniciar la API (el contador vive en memoria) |
 
 ## 7. Datos personales

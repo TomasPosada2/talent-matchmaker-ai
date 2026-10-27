@@ -1,7 +1,9 @@
 import logging
 import os
 import time
+from typing import Literal
 
+import anthropic
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -10,6 +12,7 @@ from pydantic import BaseModel, Field
 from src import (
     agent,
     auth,
+    chatbot,
     email_notifier,
     email_polling,
     job_template_repository,
@@ -113,6 +116,23 @@ async def medir_peticiones(request: Request, call_next):
 # ============================================================
 # Modelos de entrada
 # ============================================================
+
+class MensajeChat(BaseModel):
+    rol: Literal["usuario", "asistente"]
+    texto: str = Field(
+        ...,
+        min_length=1,
+        max_length=chatbot.MAX_CARACTERES_MENSAJE,
+    )
+
+
+class ChatRequest(BaseModel):
+    mensajes: list[MensajeChat] = Field(
+        ...,
+        min_length=1,
+        max_length=chatbot.MAX_MENSAJES_HISTORIAL,
+    )
+
 
 class RankingRequest(BaseModel):
     vacante: dict = Field(
@@ -447,6 +467,78 @@ def estado_gmail(
         privacy.obtener_carpeta_trabajo() / "listener_heartbeat.json",
         max_segundos_sin_ciclo=max(300, intervalo * 5),
     )
+
+
+# ============================================================
+# Asistente (Sprint 8 - #87)
+# ============================================================
+
+@app.get("/chat/status")
+def estado_asistente(
+    recruiter: dict = Depends(auth.obtener_recruiter_actual),
+):
+    return {
+        "disponible": chatbot.asistente_disponible(),
+        "modelo": chatbot.obtener_modelo(),
+        "preguntas_restantes_hoy": chatbot.preguntas_restantes(recruiter["id"]),
+    }
+
+
+@app.post("/chat")
+def conversar(
+    request: ChatRequest,
+    recruiter: dict = Depends(auth.obtener_recruiter_actual),
+):
+    """
+    Responde la última pregunta de la conversación con datos del sistema.
+
+    El cliente envía la conversación visible completa (máximo
+    MAX_MENSAJES_HISTORIAL mensajes); el servidor no guarda historial.
+    """
+    try:
+        respuesta = chatbot.responder(
+            [mensaje.model_dump() for mensaje in request.mensajes],
+            recruiter,
+        )
+    except chatbot.AsistenteNoDisponible as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "El asistente no está configurado: falta "
+                "ANTHROPIC_API_KEY en el servidor."
+            ),
+        ) from exc
+    except chatbot.CuotaAgotada as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except anthropic.AuthenticationError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="La llave de Anthropic configurada no es válida.",
+        ) from exc
+    except anthropic.RateLimitError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="El servicio de IA está saturado. Intenta en un minuto.",
+        ) from exc
+    except anthropic.APIError as exc:
+        logger.exception("Error del servicio de IA en el asistente.")
+        raise HTTPException(
+            status_code=502,
+            detail="El servicio de IA no respondió. Intenta de nuevo.",
+        ) from exc
+
+    return {
+        "respuesta": respuesta.texto,
+        "herramientas_usadas": respuesta.herramientas_usadas,
+        "metricas": {
+            "pasos": respuesta.pasos,
+            "tokens_entrada": respuesta.tokens_entrada,
+            "tokens_salida": respuesta.tokens_salida,
+        },
+        "preguntas_restantes_hoy": chatbot.preguntas_restantes(recruiter["id"]),
+    }
 
 
 # ============================================================

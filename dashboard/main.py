@@ -26,6 +26,7 @@ from dashboard.api_client import (
     enviar_api,
     iniciar_sesion,
 )
+from dashboard.assistant_page import mostrar_asistente
 from dashboard.candidate_filters import (
     filtrar_candidatos,
     preparar_tabla,
@@ -78,6 +79,7 @@ def cerrar_sesion():
     st.session_state["notificaciones"] = []
     st.session_state.pop("ranking_resultado", None)
     st.session_state.pop("ranking_plantilla_id", None)
+    st.session_state.pop("chat_historial", None)
 
 
 def mostrar_login():
@@ -176,6 +178,7 @@ with st.sidebar:
         "Inicio",
         "Candidatos",
         "Rankings",
+        "Asistente",
         "Vacantes",
         "Analítica",
         "Notificaciones",
@@ -435,6 +438,16 @@ elif pagina == "Candidatos":
 
 elif pagina == "Rankings":
     mostrar_rankings(
+        st.session_state["access_token"]
+    )
+
+
+# ---------------------------------------------------------
+# Asistente - Issue #87
+# ---------------------------------------------------------
+
+elif pagina == "Asistente":
+    mostrar_asistente(
         st.session_state["access_token"]
     )
 

@@ -92,6 +92,16 @@ Se hace una sola vez, con la cuenta de Gmail que recibe las hojas de vida.
 
 ### 3.2 Autorizar el acceso (2 min)
 
+> **Antes de autorizar, define `GMAIL_QUERY` en `.env` y apaga el lector**
+> (`docker compose --profile gmail stop listener`). Si el lector está
+> corriendo, empieza a procesar la bandeja apenas se crea `token.json`,
+> con el filtro que tenga en ese momento. En una cuenta personal o de
+> pruebas usa un filtro estrecho, por ejemplo
+> `GMAIL_QUERY=subject:"Talent Matchmaker prueba" has:attachment`: con el
+> filtro por defecto, cualquier PDF o Word recibido en los últimos 7 días
+> entraría como candidato. Si eso ocurre, bórralo desde **Administración →
+> Supresión de datos**.
+
 El consentimiento abre el navegador, así que se hace en el computador,
 fuera de Docker:
 

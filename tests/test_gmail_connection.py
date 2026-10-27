@@ -189,5 +189,9 @@ def test_mensajes_del_dashboard():
     assert "hace 2 min" in mensaje
 
     assert describir_estado_gmail({"conectado": False, "estado": "sin_datos"})[0] == "aviso"
-    assert describir_estado_gmail({"conectado": False, "estado": "error", "detalle": "x"})[0] == "error"
+    nivel, mensaje = describir_estado_gmail(
+        {"conectado": False, "estado": "error", "detalle": "No se encontró credentials.json."}
+    )
+    assert nivel == "error"
+    assert "credentials.json. Un administrador" in mensaje
     assert describir_estado_gmail(None)[0] == "aviso"

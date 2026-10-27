@@ -35,9 +35,10 @@ def describir_estado_gmail(estado: dict | None) -> tuple[str, str]:
         )
 
     if estado.get("estado") == "error":
+        detalle = (estado.get("detalle") or "error desconocido").rstrip(". ")
         return "error", (
             "La última revisión de Gmail falló: "
-            f"{estado.get('detalle') or 'error desconocido'}. "
+            f"{detalle}. "
             "Un administrador debe revisar la conexión."
         )
 

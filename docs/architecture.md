@@ -9,7 +9,7 @@
 | API REST | `src/api.py`, `src/auth.py` | `api` | Autenticación JWT con roles, perfiles, vacantes, rankings, supresión de datos, métricas. |
 | Agente de ranking | `src/agent.py`, `src/agent_tools.py` | Dentro de la API | Compara candidatos contra una vacante con Claude, usando tools que verifican la evidencia. |
 | Ranking de demostración | `src/demo_ranking.py` | Dentro del dashboard | Coincidencia textual determinista: sin IA y sin costo. |
-| Asistente (chatbot) | `src/chatbot.py`, `dashboard/assistant_page.py` | Dentro de la API | Responde preguntas en lenguaje natural con Claude y herramientas de solo lectura sobre los datos (#87). |
+| Asistente (chatbot) | `src/chatbot.py`, `dashboard/assistant_page.py` | Dentro de la API | Responde preguntas en lenguaje natural con Claude y herramientas de solo lectura sobre los datos (#87). En el dashboard es un botón flotante abajo a la derecha que abre un panel que sigue visible al navegar. |
 | Dashboard | `dashboard/` | `dashboard` | Interfaz de recruiters y admins. Solo habla con la API. |
 | PostgreSQL | `src/*_repository.py` | `db` | Perfiles, cuentas y plantillas de vacantes. |
 | ClamAV | `src/malware_scanner.py` | `clamav` | Antivirus; el pipeline se comunica con él por la red. |

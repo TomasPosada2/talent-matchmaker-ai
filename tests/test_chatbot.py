@@ -342,7 +342,7 @@ def test_limpiar_markdown_respuesta():
     assert "\\$5" in limpio
 
 
-def app_asistente(monkeypatch, disponible):
+def app_asistente(monkeypatch, disponible, abrir=True):
     def consultar(ruta, token=None):
         if ruta == "/chat/status":
             return {"disponible": disponible, "modelo": "m", "preguntas_restantes_hoy": 99}, None
@@ -357,19 +357,30 @@ def app_asistente(monkeypatch, disponible):
     app.session_state["recruiter_email"] = "r@example.com"
     app.session_state["recruiter_role"] = "recruiter"
     app.run()
-    app.sidebar.radio[0].set_value("Asistente").run()
+    if abrir:
+        app.button(key="asistente_toggle").click().run()
     return app
 
 
-def test_pagina_sin_llave_explica_como_activarlo(monkeypatch):
+def test_asistente_es_un_boton_y_no_una_seccion(monkeypatch):
+    app = app_asistente(monkeypatch, disponible=True, abrir=False)
+
+    assert not app.exception
+    assert "Asistente" not in app.sidebar.radio[0].options
+    assert app.button(key="asistente_toggle").label == "💬 Asistente"
+    # Cerrado por defecto: el panel no se dibuja hasta pulsar el botón.
+    assert not any(t.key == "asistente_pregunta" for t in app.text_input)
+
+
+def test_panel_sin_llave_explica_como_activarlo(monkeypatch):
     app = app_asistente(monkeypatch, disponible=False)
 
     assert not app.exception
-    assert "ANTHROPIC_API_KEY" in app.info[0].value
-    assert len(app.chat_input) == 0
+    assert any("ANTHROPIC_API_KEY" in i.value for i in app.info)
+    assert app.button(key="asistente_toggle").label == "✕ Cerrar asistente"
 
 
-def test_pagina_muestra_la_respuesta(monkeypatch):
+def test_panel_responde_y_sigue_abierto_al_navegar(monkeypatch):
     enviados = []
 
     def preguntar(mensajes, token):
@@ -380,9 +391,32 @@ def test_pagina_muestra_la_respuesta(monkeypatch):
     monkeypatch.setattr(assistant_page, "preguntar_asistente", preguntar)
     app = app_asistente(monkeypatch, disponible=True)
 
-    app.chat_input[0].set_value("¿Quién sabe SQL?").run()
+    app.text_input(key="asistente_pregunta").input("¿Quién sabe SQL?")
+    app.button(key="asistente_enviar").click().run()
 
     assert not app.exception
     assert enviados[0][-1] == {"rol": "usuario", "texto": "¿Quién sabe SQL?"}
+    assert [m["rol"] for m in app.session_state["chat_historial"]] == ["usuario", "asistente"]
+
+    app.sidebar.radio[0].set_value("Candidatos").run()
+
+    assert not app.exception
+    assert app.session_state["asistente_abierto"] is True
     assert len(app.session_state["chat_historial"]) == 2
-    assert any("email\\_001" in m.value or "email_001" in m.value for m in app.markdown)
+    assert any("email" in m.value and "001" in m.value for m in app.markdown)
+
+
+def test_error_del_asistente_permite_reintentar(monkeypatch):
+    monkeypatch.setattr(
+        assistant_page,
+        "preguntar_asistente",
+        lambda mensajes, token: (None, "Alcanzaste el límite diario de preguntas al asistente."),
+    )
+    app = app_asistente(monkeypatch, disponible=True)
+
+    app.text_input(key="asistente_pregunta").input("¿Hola?")
+    app.button(key="asistente_enviar").click().run()
+
+    assert not app.exception
+    assert app.session_state["chat_historial"] == []
+    assert any("límite diario" in e.value for e in app.error)

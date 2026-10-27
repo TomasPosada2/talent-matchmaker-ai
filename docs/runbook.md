@@ -56,7 +56,7 @@ El asistente usa Claude, así que necesita una llave de Anthropic:
 2. Pégala en `.env`: `ANTHROPIC_API_KEY=sk-ant-...`
 3. Reinicia la API: `docker compose up -d api`.
 
-La página **Asistente** del dashboard queda activa. Cada recruiter tiene
+El botón **💬 Asistente** (abajo a la derecha en todas las pantallas) queda activo. Cada recruiter tiene
 `CHAT_DAILY_LIMIT` preguntas al día (100 por defecto). La misma llave
 habilita el ranking con IA.
 

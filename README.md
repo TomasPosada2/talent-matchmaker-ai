@@ -19,7 +19,7 @@ Gmail ──► Listener ──► ClamAV ──► Extracción ──► Perfil
               Dashboard (Streamlit) ◄──── API REST (FastAPI + JWT) ◄──── Agente de ranking
               login, candidatos,                                          (Claude + tools que
               vacantes, rankings,                                          verifican evidencia)
-              analítica, asistente, administración
+              analítica, administración + asistente flotante
 ```
 
 El detalle de cada componente está en [docs/architecture.md](docs/architecture.md).

@@ -117,8 +117,15 @@ def enviar_api(
     ruta: str,
     datos: dict,
     token: str | None = None,
+    timeout: float = 15,
 ):
-    """Envía un POST a FastAPI y devuelve (datos, error)."""
+    """
+    Envía un POST a FastAPI y devuelve (datos, error).
+
+    Sprint 8 - #75: el ranking con IA tarda más de un minuto, así que quien
+    lo llama pasa un ``timeout`` mayor; con 15 s el dashboard abandonaba la
+    espera aunque la API terminara bien.
+    """
     headers = {}
 
     if token:
@@ -129,7 +136,7 @@ def enviar_api(
             f"{API_URL}{ruta}",
             json=datos,
             headers=headers,
-            timeout=15,
+            timeout=timeout,
         )
         response.raise_for_status()
         return response.json(), None
@@ -138,6 +145,13 @@ def enviar_api(
         return None, _mensaje_error_http(
             exc.response.status_code,
             "al guardar la información",
+        )
+
+    except httpx.TimeoutException:
+        return None, (
+            "El servidor tardó más de lo esperado en responder. "
+            "La operación puede seguir en curso: revisa tus "
+            "notificaciones en unos minutos."
         )
 
     except (httpx.RequestError, ValueError):

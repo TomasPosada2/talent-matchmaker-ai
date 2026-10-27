@@ -66,7 +66,10 @@ def _generar(modo: str, vacante: dict, plantilla: dict, token: str) -> None:
         with st.spinner(
             "Claude está evaluando a los candidatos. Puede tardar un par de minutos..."
         ):
-            datos, error = enviar_api("/rankings", {"vacante": vacante}, token)
+            # El ranking con IA tarda ~1-2 min (#75): se espera hasta 5 min.
+            datos, error = enviar_api(
+                "/rankings", {"vacante": vacante}, token, timeout=300
+            )
 
         if error:
             st.error(error)

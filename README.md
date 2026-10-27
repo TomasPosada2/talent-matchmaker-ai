@@ -24,6 +24,10 @@ Gmail ──► Listener ──► ClamAV ──► Extracción ──► Perfil
 
 El detalle de cada componente está en [docs/architecture.md](docs/architecture.md).
 
+| Inicio | Ranking con evidencia | Asistente |
+|---|---|---|
+| ![Inicio](docs/img/dashboard-inicio.png) | ![Ranking](docs/img/dashboard-ranking.png) | ![Asistente](docs/img/dashboard-asistente.png) |
+
 ## Inicio rápido (Docker)
 
 Requisitos: Docker con Compose v2 y unos 4 GB de RAM libres.

@@ -1,6 +1,7 @@
 
 """Preparación de resultados de ranking para el dashboard."""
 
+import html
 import re
 from collections.abc import Mapping
 
@@ -86,3 +87,57 @@ def preparar_resumen(ranking: list[dict]) -> list[dict]:
         }
         for candidato in ranking
     ]
+
+
+# ============================================================
+# Sprint 8 - #89: tarjetas de candidato del ranking
+# Todo texto del CV o del LLM pasa por html.escape (#61).
+# ============================================================
+
+def tarjeta_candidato_html(posicion: int, candidato: dict, nombre: str | None) -> str:
+    """Encabezado de la tarjeta: posición, nombre, barra de puntaje y confianza."""
+    puntaje = max(0, min(100, float(candidato.get("puntaje") or 0)))
+    nombre_visible = html.escape(nombre or "Candidato sin nombre")
+    identificador = html.escape(str(candidato.get("email_id", "")))
+    confianza = candidato.get("confianza_porcentaje", 0)
+
+    return (
+        '<div class="tm-candidato">'
+        f'<div class="tm-posicion">{posicion}</div>'
+        '<div class="tm-candidato-info">'
+        f'<div class="tm-candidato-nombre">{nombre_visible}</div>'
+        f'<div class="tm-candidato-id">{identificador} · confianza {confianza}%</div>'
+        f'<div class="tm-barra" role="img" aria-label="Puntaje {puntaje:g} de 100">'
+        f'<span style="width:{puntaje:g}%"></span></div>'
+        "</div>"
+        f'<div class="tm-puntaje">{puntaje:g}<small>de 100</small></div>'
+        "</div>"
+    )
+
+
+def requisitos_html(candidato: dict) -> str:
+    """Una fila por requisito: chip Cumple con la cita del CV, o Sin evidencia."""
+    filas = []
+
+    for elemento in candidato.get("justificacion") or []:
+        if not isinstance(elemento, dict):
+            continue
+        filas.append(
+            '<div class="tm-requisito">'
+            '<div class="tm-requisito-titulo">'
+            '<span class="tm-chip tm-chip-ok">✓ Cumple</span>'
+            f"{html.escape(str(elemento.get('requisito', '')))}</div>"
+            f'<p class="tm-cita">“{html.escape(str(elemento.get("evidencia", "")))}”</p>'
+            "</div>"
+        )
+
+    for requisito in candidato.get("requisitos_sin_evidencia") or []:
+        filas.append(
+            '<div class="tm-requisito">'
+            '<div class="tm-requisito-titulo">'
+            '<span class="tm-chip tm-chip-aviso">✕ Sin evidencia</span>'
+            f"{html.escape(str(requisito))}</div>"
+            "</div>"
+        )
+
+    return "".join(filas) or "<p>No hay evidencias registradas.</p>"

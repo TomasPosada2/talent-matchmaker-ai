@@ -76,7 +76,7 @@ def test_admin_ve_administracion(app):
     app.sidebar.radio[0].set_value("Administración").run()
 
     assert not app.exception
-    assert app.title[0].value == "Administración"
+    assert any("<h1>Administración</h1>" in m.value for m in app.markdown)
     assert "Crear cuenta" in [h.value for h in app.header]
 
 

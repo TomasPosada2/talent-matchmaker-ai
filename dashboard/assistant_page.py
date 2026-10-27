@@ -31,7 +31,7 @@ _IMAGEN = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
 _ENLACE = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 
 _COLORES = {
-    "light": {"fondo": "#ffffff", "borde": "#cbd5e1", "sombra": "rgba(15, 23, 42, 0.18)"},
+    "light": {"fondo": "#ffffff", "borde": "#e2e8f0", "sombra": "rgba(15, 23, 42, 0.16)"},
     "dark": {"fondo": "#1e2330", "borde": "#475569", "sombra": "rgba(0, 0, 0, 0.45)"},
 }
 
@@ -227,6 +227,7 @@ def mostrar_asistente_flotante(token: str) -> None:
         st.button(
             "✕ Cerrar asistente" if abierto else "💬 Asistente",
             key="asistente_toggle",
+            type="secondary" if abierto else "primary",
             on_click=_alternar_panel,
             help="Pregunta por los candidatos y las vacantes sin salir de esta página.",
         )

@@ -9,7 +9,7 @@ import streamlit as st
 
 from dashboard.api_client import consultar_api, eliminar_api, enviar_api
 from dashboard.candidate_filters import obtener_valor
-from dashboard.ui_style import mostrar_tabla
+from dashboard.ui_style import encabezado, mostrar_tabla
 
 ROLES = {
     "recruiter": "Recruiter",
@@ -55,7 +55,12 @@ def _mostrar_usuarios(token: str) -> None:
             options=list(ROLES),
             format_func=ROLES.get,
         )
-        crear = st.form_submit_button("Crear cuenta", width="stretch")
+        crear = st.form_submit_button(
+            "Crear cuenta",
+            type="primary",
+            icon=":material/person_add:",
+            width="stretch",
+        )
 
     if crear:
         if not correo.strip() or len(contrasena) < 8:
@@ -131,9 +136,14 @@ def _mostrar_supresion(token: str) -> None:
 
 
 def mostrar_administracion(token: str) -> None:
-    st.title("Administración")
+    encabezado(
+        "Administración",
+        "Cuentas de usuario y solicitudes de supresión de datos.",
+    )
 
-    tab_usuarios, tab_supresion = st.tabs(["Usuarios", "Supresión de datos"])
+    tab_usuarios, tab_supresion = st.tabs(
+        [":material/group: Usuarios", ":material/delete: Supresión de datos"]
+    )
 
     with tab_usuarios:
         _mostrar_usuarios(token)

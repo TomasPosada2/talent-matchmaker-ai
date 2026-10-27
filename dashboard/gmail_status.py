@@ -1,8 +1,11 @@
 """Estado de la conexión con Gmail en el dashboard - Sprint 8, issue #86."""
 
+import html
+
 import streamlit as st
 
 from dashboard.api_client import consultar_api
+from dashboard.ui_style import chip
 
 
 def _hace(segundos: int | None) -> str:
@@ -52,6 +55,30 @@ def describir_estado_gmail(estado: dict | None) -> tuple[str, str]:
     return "aviso", (
         "Gmail no está conectado: los CVs no llegan automáticamente. "
         "Un administrador puede conectarlo siguiendo docs/runbook.md, sección 3."
+    )
+
+
+def chip_estado_gmail(estado: dict | None) -> str:
+    """
+    Sprint 8 - #89: el estado de Gmail como chip compacto para Inicio.
+
+    El texto largo de describir_estado_gmail queda como tooltip (title).
+    """
+    nivel, mensaje = describir_estado_gmail(estado)
+    tipo = {"ok": "ok", "error": "error"}.get(nivel, "aviso")
+
+    if nivel == "ok":
+        corto = f"Gmail conectado · {estado.get('cuenta') or 'cuenta'}"
+    elif nivel == "error":
+        corto = "Gmail: la última revisión falló"
+    elif isinstance(estado, dict) and estado.get("estado") == "inactivo":
+        corto = "Gmail: sin actividad reciente"
+    else:
+        corto = "Gmail no conectado"
+
+    return (
+        f'<span title="{html.escape(mensaje)}">'
+        f"{chip(corto, tipo, '✉')}</span>"
     )
 
 

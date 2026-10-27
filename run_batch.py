@@ -26,7 +26,6 @@ def main():
 
     correos = obtener_correos_gmail(
         carpeta_descargas=CARPETA_GMAIL,
-        max_resultados=50,
     )
 
     print(f"Correos obtenidos de Gmail: {len(correos)}")

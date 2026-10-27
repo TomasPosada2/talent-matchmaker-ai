@@ -60,20 +60,63 @@ docker compose run --rm api python scripts/create_admin.py admin@empresa.com
 Después, un admin crea recruiters desde el dashboard (sección **Administración**)
 o con `POST /auth/register`.
 
-## 3. Gmail (opcional)
+## 3. Conectar Gmail (#86)
 
-1. En Google Cloud, crea credenciales OAuth de tipo *Desktop app* y descarga
-   `credentials.json` en `./secrets/`.
-2. La primera autorización abre un navegador, así que se hace en el host:
-   ```bash
-   GMAIL_CREDENTIALS_PATH=secrets/credentials.json GMAIL_TOKEN_PATH=secrets/token.json \
-     python -c "from src.gmail_auth import obtener_credenciales_gmail as c; c()"
-   ```
-3. En Linux, da escritura al usuario del contenedor: `sudo chown -R 10001 secrets`.
-4. Levanta el listener: `docker compose --profile gmail up -d`.
+Se hace una sola vez, con la cuenta de Gmail que recibe las hojas de vida.
+
+### 3.1 Crear las credenciales en Google Cloud (10 min)
+
+1. Entra a https://console.cloud.google.com con esa cuenta y crea un
+   proyecto (por ejemplo, "Talent Matchmaker").
+2. **APIs y servicios → Biblioteca**: busca *Gmail API* y pulsa **Habilitar**.
+3. **APIs y servicios → Pantalla de consentimiento de OAuth**: tipo
+   *Externo*, nombre de la app y tu correo de soporte. En **Usuarios de
+   prueba** agrega la cuenta de Gmail que recibe los CVs.
+4. **APIs y servicios → Credenciales → Crear credenciales → ID de cliente
+   de OAuth**, tipo **App de escritorio**. Descarga el JSON y guárdalo como
+   `secrets/credentials.json` en la raíz del proyecto.
+
+`secrets/` está en `.gitignore`: nunca se sube al repositorio.
+
+### 3.2 Autorizar el acceso (2 min)
+
+El consentimiento abre el navegador, así que se hace en el computador,
+fuera de Docker:
+
+```bash
+python scripts/gmail_authorize.py
+```
+
+Inicia sesión con la cuenta de los CVs y acepta los permisos: leer correos
+(para recibir las hojas de vida) y enviar correos (para avisar cuando un
+ranking está listo). El script muestra la cuenta conectada y guarda
+`secrets/token.json`, que luego se renueva solo.
+
+En Linux, da escritura al usuario del contenedor: `sudo chown -R 10001 secrets`.
+
+### 3.3 Encender el lector de correos
+
+```bash
+docker compose --profile gmail up -d
+```
+
+En el dashboard, la pantalla **Inicio** debe mostrar "Gmail conectado:
+<cuenta>" en uno o dos minutos.
+
+### Qué correos se procesan
+
+Solo los que cumplen `GMAIL_QUERY` (por defecto
+`in:inbox has:attachment newer_than:7d`: correos de la bandeja de entrada
+de los últimos 7 días que traen adjuntos), hasta `GMAIL_MAX_RESULTS` por
+revisión. Cada correo se procesa una sola vez, aunque siga en la bandeja.
+Para usar una etiqueta de Gmail dedicada, por ejemplo con un filtro que
+etiquete los correos con "CV": `GMAIL_QUERY=label:cv`.
 
 El listener revisa la bandeja cada `POLL_INTERVAL_SECONDS` y queda
 *unhealthy* si pasa 5 minutos sin completar un ciclo.
+
+**Antes de recibir CVs reales** se necesita el aviso de privacidad (#74,
+`docs/privacy.md`). Para probar, envía CVs de prueba desde otra cuenta.
 
 ## 4. Producción con HTTPS
 

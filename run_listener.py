@@ -31,7 +31,6 @@ def main():
         carpeta_trabajo=CARPETA_TRABAJO,
         ruta_estado=RUTA_ESTADO,
         intervalo_segundos=INTERVALO_SEGUNDOS,
-        max_resultados=50,
         ruta_heartbeat=RUTA_HEARTBEAT,
     )
 

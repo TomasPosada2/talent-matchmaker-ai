@@ -30,6 +30,7 @@ from dashboard.candidate_filters import (
     filtrar_candidatos,
     preparar_tabla,
 )
+from dashboard.gmail_status import mostrar_estado_gmail
 from dashboard.notifications import (
     contar_no_leidas,
     crear_notificacion,
@@ -243,6 +244,8 @@ if pagina == "Inicio":
         st.warning(
             "No fue posible confirmar el estado de la API."
         )
+
+    mostrar_estado_gmail(st.session_state["access_token"])
 
     st.divider()
 

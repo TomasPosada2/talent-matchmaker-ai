@@ -11,6 +11,7 @@ from src import (
     agent,
     auth,
     email_notifier,
+    email_polling,
     job_template_repository,
     observability,
     privacy,
@@ -424,6 +425,28 @@ def eliminar_perfil(
         "perfil_eliminado": existia,
         "archivos_eliminados": archivos,
     }
+
+
+# ============================================================
+# Gmail (Sprint 8 - #86)
+# ============================================================
+
+@app.get("/gmail/status")
+def estado_gmail(
+    recruiter: dict = Depends(auth.obtener_recruiter_actual),
+):
+    """
+    Estado de la conexión con Gmail, según el último ciclo del listener.
+
+    Se considera desconectado si no hubo un ciclo correcto en los últimos
+    5 intervalos de polling (mínimo 5 minutos).
+    """
+    intervalo = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
+
+    return email_polling.leer_estado_listener(
+        privacy.obtener_carpeta_trabajo() / "listener_heartbeat.json",
+        max_segundos_sin_ciclo=max(300, intervalo * 5),
+    )
 
 
 # ============================================================

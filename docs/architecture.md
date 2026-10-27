@@ -82,6 +82,7 @@ aditivos (`ADD COLUMN IF NOT EXISTS`).
 | Recurso | Anónimo | Recruiter | Admin |
 |---|---|---|---|
 | `GET /health`, `/health/ready` | ✓ | ✓ | ✓ |
+| `GET /gmail/status` | | ✓ | ✓ |
 | `POST /auth/login` | ✓ | ✓ | ✓ |
 | `GET /profiles`, `/profiles/{id}` | | ✓ | ✓ |
 | `/job-templates` (solo las propias) | | ✓ | ✓ |

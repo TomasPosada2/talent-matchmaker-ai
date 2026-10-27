@@ -603,3 +603,29 @@ def test_issue40_schema_rechaza_confianza_fuera_de_rango():
 
     assert not es_valido
     assert error is not None
+
+# ============================================================
+# Sprint 8 - #75: respuesta final con texto o bloque de código
+# ============================================================
+
+def test_extraer_json_final_acepta_formatos_del_modelo_real():
+    from src.agent import _extraer_json_final
+
+    puro = '{"ranking": []}'
+    con_bloque = 'Ahora presento el ranking final.\n\n```json\n{"ranking": [{"email_id": "a"}]}\n```'
+    con_texto = 'Resultado: {"ranking": [{"email_id": "b"}]} Fin.'
+
+    assert _extraer_json_final(puro) == {"ranking": []}
+    assert _extraer_json_final(con_bloque)["ranking"][0]["email_id"] == "a"
+    assert _extraer_json_final(con_texto)["ranking"][0]["email_id"] == "b"
+
+
+def test_extraer_json_final_sin_json_falla():
+    import json
+
+    import pytest
+
+    from src.agent import _extraer_json_final
+
+    with pytest.raises(json.JSONDecodeError):
+        _extraer_json_final("No pude generar el ranking.")

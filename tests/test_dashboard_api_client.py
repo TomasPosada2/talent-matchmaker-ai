@@ -118,3 +118,41 @@ def test_consultar_api_respuesta_invalida(monkeypatch):
 
     assert datos is None
     assert error is not None
+
+
+# Sprint 8 - #75: el ranking con IA tarda más de un minuto.
+
+
+def test_enviar_api_usa_el_timeout_indicado(monkeypatch):
+    import httpx
+
+    from dashboard import api_client
+
+    recibido = {}
+
+    def post(url, **kwargs):
+        recibido["timeout"] = kwargs["timeout"]
+        return httpx.Response(200, json={"ok": True}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(api_client.httpx, "post", post)
+
+    datos, error = api_client.enviar_api("/rankings", {}, "token", timeout=300)
+
+    assert error is None
+    assert recibido["timeout"] == 300
+
+
+def test_enviar_api_explica_el_timeout(monkeypatch):
+    import httpx
+
+    from dashboard import api_client
+
+    def post(url, **kwargs):
+        raise httpx.ReadTimeout("tardó", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(api_client.httpx, "post", post)
+
+    datos, error = api_client.enviar_api("/rankings", {}, "token")
+
+    assert datos is None
+    assert "tardó más de lo esperado" in error

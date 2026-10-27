@@ -11,7 +11,7 @@ from dashboard.candidate_filters import (
     obtener_valor,
 )
 from dashboard.ranking_view import preparar_ranking
-from dashboard.ui_style import mostrar_tabla
+from dashboard.ui_style import encabezado, mostrar_tabla
 
 
 def calcular_habilidades(perfiles: list[dict]) -> list[dict]:
@@ -75,11 +75,9 @@ def calcular_metricas_ranking(datos: dict) -> dict:
 
 def mostrar_analitica(token: str):
     """Muestra métricas y gráficos de reclutamiento."""
-    st.title("Analítica de reclutamiento")
-
-    st.write(
-        "Consulta indicadores de candidatos, vacantes "
-        "y resultados de evaluación."
+    encabezado(
+        "Analítica",
+        "Indicadores de candidatos, vacantes y del último ranking.",
     )
 
     respuesta_perfiles, error_perfiles = consultar_api(
@@ -134,9 +132,7 @@ def mostrar_analitica(token: str):
         len(plantillas),
     )
 
-    st.divider()
-
-    st.header("Habilidades frecuentes")
+    st.header("Habilidades más frecuentes")
 
     habilidades = calcular_habilidades(perfiles)
 
@@ -146,6 +142,9 @@ def mostrar_analitica(token: str):
             x="Habilidad",
             y="Candidatos",
             horizontal=True,
+            sort="-Candidatos",
+            x_label="Candidatos",
+            y_label="",
         )
 
         # Alternativa textual del gráfico (WCAG 1.1.1).
@@ -155,8 +154,6 @@ def mostrar_analitica(token: str):
             "No hay suficientes habilidades "
             "estructuradas para generar el gráfico."
         )
-
-    st.divider()
 
     st.header("Último ranking de la sesión")
 
@@ -212,6 +209,7 @@ def mostrar_analitica(token: str):
             tabla,
             x="Candidato",
             y="Puntaje",
+            sort="-Puntaje",
         )
 
         # Alternativa textual del gráfico (WCAG 1.1.1).

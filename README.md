@@ -19,10 +19,14 @@ Gmail ──► Listener ──► ClamAV ──► Extracción ──► Perfil
               Dashboard (Streamlit) ◄──── API REST (FastAPI + JWT) ◄──── Agente de ranking
               login, candidatos,                                          (Claude + tools que
               vacantes, rankings,                                          verifican evidencia)
-              analítica, administración
+              analítica, administración + asistente flotante
 ```
 
 El detalle de cada componente está en [docs/architecture.md](docs/architecture.md).
+
+| Inicio | Ranking con evidencia | Asistente |
+|---|---|---|
+| ![Inicio](docs/img/dashboard-inicio.png) | ![Ranking](docs/img/dashboard-ranking.png) | ![Asistente](docs/img/dashboard-asistente.png) |
 
 ## Inicio rápido (Docker)
 
@@ -75,6 +79,7 @@ src/
   attachment_handler.py, malware_scanner.py, text_extractor.py       adjuntos, ClamAV, PDF/DOCX/OCR
   profile_structurer.py, schema.py                                   perfil con evidencia
   vacancy_structurer.py, agent.py, agent_tools.py, demo_ranking.py   ranking (IA y demostración)
+  chatbot.py                                                         asistente conversacional
   api.py, auth.py                                                    API REST, JWT y roles
   profile_repository.py, job_template_repository.py                  PostgreSQL
   observability.py, privacy.py                                       métricas, alertas, PII
@@ -105,6 +110,8 @@ monitoring/, deploy/                                                 Prometheus 
 
 - `GET /profiles` devuelve todos los perfiles: hay que paginarlo antes de
   llegar a unos 5.000 candidatos ([docs/performance.md](docs/performance.md)).
+- El asistente y el ranking con IA necesitan `ANTHROPIC_API_KEY`
+  ([docs/runbook.md](docs/runbook.md), sección 2).
 - El ranking con IA es síncrono y no tiene cuota por usuario
   ([docs/security-review.md](docs/security-review.md), A04).
 - La exportación de rankings a CSV/PDF (`src/ranking_exporter.py`, #42)

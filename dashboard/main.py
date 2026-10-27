@@ -1,4 +1,3 @@
-
 """
 Dashboard de reclutamiento - Talent Matchmaker AI.
 
@@ -13,9 +12,15 @@ Sprint 7:
 - Issue #59: accesibilidad (tablas accesibles, idioma, títulos, mensajes).
 - Issues #61/#63: administración de cuentas y supresión de datos.
 
+Sprint 8:
+- Issue #87: asistente flotante.
+- Issue #89: rediseño visual (tema en .streamlit/config.toml).
+
 Ejecución:
     py -m streamlit run dashboard/main.py
 """
+
+import html
 
 import streamlit as st
 
@@ -26,31 +31,53 @@ from dashboard.api_client import (
     enviar_api,
     iniciar_sesion,
 )
+from dashboard.assistant_page import mostrar_asistente_flotante
 from dashboard.candidate_filters import (
     filtrar_candidatos,
     preparar_tabla,
 )
+from dashboard.gmail_status import chip_estado_gmail
 from dashboard.notifications import (
     contar_no_leidas,
     crear_notificacion,
     limpiar_notificaciones,
     marcar_todas_leidas,
 )
+from dashboard.ranking_view import escapar_markdown
 from dashboard.rankings_page import mostrar_rankings
-from dashboard.ui_style import aplicar_estilos, mostrar_tabla
+from dashboard.ui_style import (
+    acceso_html,
+    aplicar_estilos,
+    chip,
+    encabezado,
+    fila_de_chips,
+    mostrar_tabla,
+)
 
 # ---------------------------------------------------------
 # Configuración general
 # ---------------------------------------------------------
 
 st.set_page_config(
-    page_title="Talent Matchmaker AI | Dashboard",
-    page_icon="📊",
+    page_title="Talent Matchmaker AI",
+    page_icon="🎯",
     layout="wide",
-    initial_sidebar_state="expanded",
+    # "auto": abierto en escritorio, plegado en el celular (#60).
+    initial_sidebar_state="auto",
 )
 
 aplicar_estilos()
+
+# Íconos de Material Symbols para el menú (Streamlit los dibuja en el label).
+ICONOS_MENU = {
+    "Inicio": ":material/home:",
+    "Candidatos": ":material/group:",
+    "Rankings": ":material/leaderboard:",
+    "Vacantes": ":material/work:",
+    "Analítica": ":material/insights:",
+    "Notificaciones": ":material/notifications:",
+    "Administración": ":material/admin_panel_settings:",
+}
 
 # ---------------------------------------------------------
 # Estado de autenticación
@@ -77,22 +104,38 @@ def cerrar_sesion():
     st.session_state["notificaciones"] = []
     st.session_state.pop("ranking_resultado", None)
     st.session_state.pop("ranking_plantilla_id", None)
+    for clave in (
+        "chat_historial",
+        "asistente_abierto",
+        "asistente_pendiente",
+        "asistente_error",
+        "pagina_actual",
+    ):
+        st.session_state.pop(clave, None)
+
+
+def ir_a(pagina: str) -> None:
+    """Callback de los accesos rápidos: cambia la sección del menú."""
+    st.session_state["pagina_actual"] = pagina
 
 
 def mostrar_login():
     """Muestra el formulario de autenticación."""
-    st.title("Talent Matchmaker AI")
-    st.header("Iniciar sesión")
-
-    st.write(
-        "Ingresa tus credenciales para acceder "
-        "al panel de reclutamiento."
-    )
-
-    izquierda, centro, derecha = st.columns([1, 2, 1])
+    _, centro, _ = st.columns([1, 1.15, 1])
 
     with centro:
+        st.markdown(
+            '<div class="tm-login-marca">'
+            '<div class="tm-marca-logo" aria-hidden="true">TM</div>'
+            "<h1>Talent Matchmaker AI</h1>"
+            "<p>Preselección de candidatos con evidencia verificable</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
         with st.form("formulario_login"):
+            st.header("Iniciar sesión")
+
             correo = st.text_input(
                 "Correo electrónico",
                 placeholder="recruiter@empresa.com",
@@ -105,8 +148,13 @@ def mostrar_login():
 
             enviar = st.form_submit_button(
                 "Iniciar sesión",
+                type="primary",
                 width="stretch",
             )
+
+        st.caption(
+            "¿No tienes cuenta? Pídesela a un administrador del sistema."
+        )
 
         if enviar:
             if not correo.strip() or not contrasena:
@@ -161,15 +209,29 @@ if not st.session_state["access_token"]:
 # Menú lateral
 # ---------------------------------------------------------
 
+correo_usuario = st.session_state["recruiter_email"] or ""
+rol_usuario = (
+    "Administrador"
+    if st.session_state["recruiter_role"] == "admin"
+    else "Recruiter"
+)
+pendientes = contar_no_leidas(st.session_state["notificaciones"])
+
 with st.sidebar:
-    st.title("Talent Matchmaker AI")
-    st.caption("Recruitment Dashboard")
-    st.divider()
-
-    st.caption("Sesión iniciada")
-    st.write(st.session_state["recruiter_email"])
-
-    st.divider()
+    st.markdown(
+        '<div class="tm-marca">'
+        '<div class="tm-marca-logo" aria-hidden="true">TM</div>'
+        "<div><div class=\"tm-marca-nombre\">Talent Matchmaker</div>"
+        '<div class="tm-marca-sub">Reclutamiento con evidencia</div></div>'
+        "</div>"
+        '<div class="tm-usuario">'
+        f'<div class="tm-avatar" aria-hidden="true">{html.escape(correo_usuario[:2].upper())}</div>'
+        f'<div style="min-width:0"><div class="tm-usuario-correo">{html.escape(correo_usuario)}</div>'
+        f'<div class="tm-usuario-rol">{rol_usuario}</div></div>'
+        "</div>"
+        '<p class="tm-seccion-menu">Menú</p>',
+        unsafe_allow_html=True,
+    )
 
     paginas = [
         "Inicio",
@@ -183,15 +245,22 @@ with st.sidebar:
     if st.session_state["recruiter_role"] == "admin":
         paginas.append("Administración")
 
-    pagina = st.radio("Navegación", paginas)
+    if st.session_state.get("pagina_actual") not in paginas:
+        st.session_state["pagina_actual"] = "Inicio"
 
-    pendientes = contar_no_leidas(
-        st.session_state["notificaciones"]
+    def etiqueta_menu(nombre: str) -> str:
+        etiqueta = f"{ICONOS_MENU[nombre]} {nombre}"
+        if nombre == "Notificaciones" and pendientes:
+            etiqueta += f" ({pendientes})"
+        return etiqueta
+
+    pagina = st.radio(
+        "Navegación",
+        paginas,
+        key="pagina_actual",
+        format_func=etiqueta_menu,
+        label_visibility="collapsed",
     )
-    if pendientes:
-        st.caption(
-            f"Notificaciones pendientes: {pendientes}"
-        )
 
     st.divider()
 
@@ -204,16 +273,15 @@ with st.sidebar:
         ),
     )
 
-    st.divider()
-
     if st.button(
         "Cerrar sesión",
+        icon=":material/logout:",
         width="stretch",
     ):
         cerrar_sesion()
         st.rerun()
 
-    st.caption("Dashboard v1.1")
+    st.caption("Talent Matchmaker AI · v1.2")
 
 
 # ---------------------------------------------------------
@@ -221,71 +289,55 @@ with st.sidebar:
 # ---------------------------------------------------------
 
 if pagina == "Inicio":
-    st.title("Panel de reclutamiento")
-
-    st.write(
-        "Bienvenido a Talent Matchmaker AI. "
-        "Consulta el estado del sistema y accede "
-        "a las herramientas de reclutamiento."
+    nombre_saludo = correo_usuario.split("@")[0] if correo_usuario else ""
+    encabezado(
+        f"Hola, {nombre_saludo}" if nombre_saludo else "Panel de reclutamiento",
+        "Este es el estado de tu proceso de reclutamiento.",
     )
 
-    st.header("Estado del sistema")
-
     estado, error = consultar_api("/health")
+    estado_gmail, _ = consultar_api(
+        "/gmail/status",
+        st.session_state["access_token"],
+    )
 
     if error:
-        st.error(error)
-
+        chip_api = chip("API sin conexión", "error", "●")
     elif estado and estado.get("status") == "ok":
-        st.success("API conectada y funcionando.")
-
+        chip_api = chip("API conectada", "ok", "●")
     else:
-        st.warning(
-            "No fue posible confirmar el estado de la API."
-        )
+        chip_api = chip("Estado de la API desconocido", "aviso", "●")
 
-    st.divider()
+    fila_de_chips([chip_api, chip_estado_gmail(estado_gmail)])
 
     perfiles, error_perfiles = consultar_api(
         "/profiles",
         st.session_state["access_token"],
     )
-
-    total_candidatos = None
-
-    if not error_perfiles and isinstance(perfiles, dict):
-        total_candidatos = perfiles.get("total")
-
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric(
-        "Candidatos registrados",
-        (
-            total_candidatos
-            if total_candidatos is not None
-            else "—"
-        ),
-    )
-
     plantillas, _ = consultar_api(
         "/job-templates",
         st.session_state["access_token"],
     )
 
-    total_vacantes = (
-        plantillas.get("total")
-        if isinstance(plantillas, dict)
+    total_candidatos = (
+        perfiles.get("total")
+        if not error_perfiles and isinstance(perfiles, dict)
         else None
     )
+    total_vacantes = (
+        plantillas.get("total") if isinstance(plantillas, dict) else None
+    )
 
+    col1, col2, col3 = st.columns(3)
+    col1.metric(
+        "Candidatos",
+        total_candidatos if total_candidatos is not None else "—",
+    )
     col2.metric(
-        "Vacantes guardadas",
+        "Vacantes",
         total_vacantes if total_vacantes is not None else "—",
     )
-    col3.metric(
-        "Notificaciones sin leer",
-        contar_no_leidas(st.session_state["notificaciones"]),
-    )
+    col3.metric("Notificaciones sin leer", pendientes)
 
     if error_perfiles:
         st.warning(
@@ -293,28 +345,30 @@ if pagina == "Inicio":
             "Verifica que tu sesión siga siendo válida."
         )
 
-    st.header("Herramientas disponibles")
+    st.header("Accesos rápidos")
 
-    c1, c2, c3 = st.columns(3)
+    accesos = [
+        ("Candidatos", "Busca y filtra los perfiles de los CVs.", "👥"),
+        ("Rankings", "Compara candidatos contra una vacante.", "🏆"),
+        ("Vacantes", "Crea plantillas con cargo y requisitos.", "💼"),
+    ]
 
-    with c1:
-        st.info(
-            "**Candidatos**\n\n"
-            "Consulta y filtra perfiles procesados."
-        )
-
-    with c2:
-        st.info(
-            "**Rankings**\n\n"
-            "Compara candidatos con los requisitos "
-            "de una vacante."
-        )
-
-    with c3:
-        st.info(
-            "**Vacantes**\n\n"
-            "Crea y consulta plantillas de vacantes."
-        )
+    for columna, (destino, descripcion, icono) in zip(
+        st.columns(3), accesos, strict=True
+    ):
+        with columna, st.container(border=True):
+            st.markdown(
+                acceso_html(destino, descripcion, icono),
+                unsafe_allow_html=True,
+            )
+            st.button(
+                f"Abrir {destino.lower()}",
+                key=f"ir_{destino}",
+                on_click=ir_a,
+                args=(destino,),
+                icon=":material/arrow_forward:",
+                width="stretch",
+            )
 
 
 # ---------------------------------------------------------
@@ -322,11 +376,9 @@ if pagina == "Inicio":
 # ---------------------------------------------------------
 
 elif pagina == "Candidatos":
-    st.title("Candidatos")
-
-    st.write(
-        "Consulta los perfiles registrados y utiliza "
-        "los filtros para encontrar candidatos."
+    encabezado(
+        "Candidatos",
+        "Perfiles extraídos de las hojas de vida, con su evidencia.",
     )
 
     resultado, error = consultar_api(
@@ -347,36 +399,32 @@ elif pagina == "Candidatos":
             )
             st.stop()
 
-        st.metric(
-            "Total de candidatos registrados",
-            len(perfiles),
-        )
+        with st.container(border=True):
+            col1, col2, col3 = st.columns(3)
 
-        st.divider()
-        st.header("Buscar candidatos")
+            with col1:
+                nombre = st.text_input(
+                    "Nombre",
+                    placeholder="Ej. María González",
+                    key="filtro_nombre",
+                    icon=":material/person_search:",
+                )
 
-        col1, col2, col3 = st.columns(3)
+            with col2:
+                habilidad = st.text_input(
+                    "Habilidades",
+                    placeholder="Ej. Python, Excel, SQL",
+                    key="filtro_habilidad",
+                    icon=":material/psychology:",
+                )
 
-        with col1:
-            nombre = st.text_input(
-                "Nombre",
-                placeholder="Ej. María González",
-                key="filtro_nombre",
-            )
-
-        with col2:
-            habilidad = st.text_input(
-                "Habilidades",
-                placeholder="Ej. Python, Excel, SQL",
-                key="filtro_habilidad",
-            )
-
-        with col3:
-            experiencia = st.text_input(
-                "Experiencia",
-                placeholder="Ej. ventas, desarrollo, logística",
-                key="filtro_experiencia",
-            )
+            with col3:
+                experiencia = st.text_input(
+                    "Experiencia",
+                    placeholder="Ej. ventas, desarrollo",
+                    key="filtro_experiencia",
+                    icon=":material/work_history:",
+                )
 
         candidatos_filtrados = filtrar_candidatos(
             perfiles,
@@ -385,28 +433,15 @@ elif pagina == "Candidatos":
             experiencia=experiencia,
         )
 
-        st.divider()
-        st.header("Resultados")
-
-        col_resultados, col_total = st.columns(2)
-
-        col_resultados.metric(
-            "Candidatos encontrados",
-            len(candidatos_filtrados),
-        )
-
-        col_total.metric(
-            "Candidatos disponibles",
-            len(perfiles),
-        )
+        fila_de_chips([
+            chip(
+                f"{len(candidatos_filtrados)} de {len(perfiles)} candidatos",
+                "primario",
+            ),
+        ])
 
         if candidatos_filtrados:
             mostrar_tabla(preparar_tabla(candidatos_filtrados))
-
-            st.caption(
-                "Los resultados se actualizan "
-                "automáticamente al modificar los filtros."
-            )
 
         elif perfiles:
             st.info(
@@ -416,8 +451,8 @@ elif pagina == "Candidatos":
 
         else:
             st.info(
-                "Todavía no hay candidatos registrados "
-                "en el sistema."
+                "Todavía no hay candidatos registrados. "
+                "Llegarán solos cuando Gmail esté conectado."
             )
 
     else:
@@ -441,27 +476,27 @@ elif pagina == "Rankings":
 # ---------------------------------------------------------
 
 elif pagina == "Vacantes":
-    st.title("Vacantes")
-
-    st.write(
-        "Crea descripciones estructuradas de vacantes "
-        "y guarda plantillas para reutilizarlas."
+    encabezado(
+        "Vacantes",
+        "Plantillas con el cargo y los requisitos contra los que se rankea.",
     )
 
     tab_crear, tab_consultar = st.tabs(
-        ["Crear vacante", "Plantillas guardadas"]
+        [":material/add: Crear vacante", ":material/list: Plantillas guardadas"]
     )
 
     with tab_crear:
-        st.header("Nueva plantilla de vacante")
-
         with st.form("formulario_vacante", clear_on_submit=True):
-            nombre_plantilla = st.text_input(
+            st.header("Nueva plantilla")
+
+            col_nombre, col_cargo = st.columns(2)
+
+            nombre_plantilla = col_nombre.text_input(
                 "Nombre de la plantilla",
                 placeholder="Ej. Analista de datos - Medellín",
             )
 
-            cargo = st.text_input(
+            cargo = col_cargo.text_input(
                 "Cargo",
                 placeholder="Ej. Analista de datos",
             )
@@ -474,7 +509,7 @@ elif pagina == "Vacantes":
                     "Conocimiento de SQL\n"
                     "Manejo de Power BI"
                 ),
-                height=180,
+                height=160,
             )
 
             st.caption(
@@ -485,7 +520,8 @@ elif pagina == "Vacantes":
 
             guardar = st.form_submit_button(
                 "Guardar plantilla",
-                width="stretch",
+                type="primary",
+                icon=":material/save:",
             )
 
         if guardar:
@@ -534,8 +570,8 @@ elif pagina == "Vacantes":
 
                 elif respuesta:
                     st.success(
-                        "La plantilla de vacante "
-                        "se guardó correctamente."
+                        f"Se guardó la plantilla «{nombre_limpio}» "
+                        f"con {len(requisitos)} requisitos."
                     )
 
                     st.session_state["notificaciones"] = (
@@ -547,8 +583,6 @@ elif pagina == "Vacantes":
                         )
                     )
 
-                    st.json(respuesta)
-
                 else:
                     st.warning(
                         "El servidor no confirmó "
@@ -556,14 +590,6 @@ elif pagina == "Vacantes":
                     )
 
     with tab_consultar:
-        st.header("Plantillas guardadas")
-
-        if st.button(
-            "Actualizar lista",
-            key="actualizar_plantillas",
-        ):
-            st.rerun()
-
         resultado, error = consultar_api(
             "/job-templates",
             st.session_state["access_token"],
@@ -581,67 +607,41 @@ elif pagina == "Vacantes":
                     "de plantillas inválido."
                 )
 
-            else:
-                st.metric(
-                    "Plantillas registradas",
-                    len(plantillas),
+            elif not plantillas:
+                st.info(
+                    "Todavía no tienes plantillas "
+                    "de vacantes guardadas."
                 )
 
-                if not plantillas:
-                    st.info(
-                        "Todavía no tienes plantillas "
-                        "de vacantes guardadas."
-                    )
+            else:
+                fila_de_chips([
+                    chip(f"{len(plantillas)} plantillas", "primario"),
+                ])
 
-                else:
-                    for plantilla in plantillas:
-                        if not isinstance(plantilla, dict):
-                            continue
+                for plantilla in plantillas:
+                    if not isinstance(plantilla, dict):
+                        continue
 
-                        nombre = plantilla.get(
-                            "nombre",
-                            "Plantilla sin nombre",
+                    vacante = plantilla.get("vacante") or {}
+                    if not isinstance(vacante, dict):
+                        vacante = {}
+
+                    requisitos_guardados = vacante.get("requisitos", [])
+                    if not isinstance(requisitos_guardados, list):
+                        requisitos_guardados = []
+
+                    with st.container(border=True):
+                        st.markdown(
+                            f"**{escapar_markdown(plantilla.get('nombre', 'Plantilla sin nombre'))}**  \n"
+                            f"Cargo: {escapar_markdown(vacante.get('cargo', 'No especificado'))}"
                         )
-
-                        identificador = plantilla.get("id")
-                        vacante = plantilla.get("vacante") or {}
-
-                        if not isinstance(vacante, dict):
-                            vacante = {}
-
-                        cargo_guardado = vacante.get(
-                            "cargo",
-                            "No especificado",
-                        )
-
-                        requisitos_guardados = vacante.get(
-                            "requisitos",
-                            [],
-                        )
-
-                        if not isinstance(requisitos_guardados, list):
-                            requisitos_guardados = []
-
-                        with st.expander(
-                            f"{nombre} — {cargo_guardado}"
-                        ):
-                            st.write(
-                                f"**ID:** {identificador}"
-                            )
-
-                            st.write(
-                                f"**Cargo:** {cargo_guardado}"
-                            )
-
-                            st.write("**Requisitos:**")
-
-                            if requisitos_guardados:
-                                for requisito in requisitos_guardados:
-                                    st.write(f"- {requisito}")
-                            else:
-                                st.caption(
-                                    "Sin requisitos registrados."
-                                )
+                        if requisitos_guardados:
+                            fila_de_chips([
+                                chip(str(requisito), "neutro")
+                                for requisito in requisitos_guardados
+                            ])
+                        else:
+                            st.caption("Sin requisitos registrados.")
 
         else:
             st.warning(
@@ -650,7 +650,7 @@ elif pagina == "Vacantes":
 
 
 # ---------------------------------------------------------
-# Notificaciones
+# Analítica, Administración y Notificaciones
 # ---------------------------------------------------------
 
 elif pagina == "Analítica":
@@ -664,22 +664,34 @@ elif pagina == "Administración":
     )
 
 elif pagina == "Notificaciones":
-    st.title("Notificaciones")
-    st.write("Consulta los eventos de esta sesión.")
+    encabezado(
+        "Notificaciones",
+        "Eventos de esta sesión: vacantes creadas, rankings generados.",
+    )
 
     notificaciones = st.session_state["notificaciones"]
-    pendientes = contar_no_leidas(notificaciones)
-    st.metric("Sin leer", pendientes)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Marcar todas como leídas"):
+    col_estado, col_leer, col_limpiar = st.columns([2, 1, 1])
+    with col_estado:
+        fila_de_chips([chip(f"{pendientes} sin leer", "primario")])
+    with col_leer:
+        if st.button(
+            "Marcar como leídas",
+            icon=":material/done_all:",
+            width="stretch",
+            disabled=not pendientes,
+        ):
             st.session_state["notificaciones"] = (
                 marcar_todas_leidas(notificaciones)
             )
             st.rerun()
-    with col2:
-        if st.button("Limpiar notificaciones"):
+    with col_limpiar:
+        if st.button(
+            "Limpiar",
+            icon=":material/delete_sweep:",
+            width="stretch",
+            disabled=not notificaciones,
+        ):
             st.session_state["notificaciones"] = (
                 limpiar_notificaciones()
             )
@@ -689,13 +701,25 @@ elif pagina == "Notificaciones":
         st.info("No hay notificaciones en esta sesión.")
     else:
         for notificacion in notificaciones:
-            estado = (
-                "Leída" if notificacion["leida"] else "Sin leer"
-            )
             with st.container(border=True):
-                st.write(
-                    f"**{notificacion['titulo']}** "
-                    f"— {estado}"
+                estado_chip = (
+                    chip("Leída", "neutro")
+                    if notificacion["leida"]
+                    else chip("Nueva", "primario")
+                )
+                st.markdown(
+                    f"**{html.escape(notificacion['titulo'])}** &nbsp; {estado_chip}",
+                    unsafe_allow_html=True,
                 )
                 st.caption(notificacion["fecha"])
                 st.write(notificacion["mensaje"])
+
+
+# ---------------------------------------------------------
+# Asistente flotante - Issue #87
+# Se dibuja al final para que la sección actual aparezca primero.
+# ---------------------------------------------------------
+
+mostrar_asistente_flotante(
+    st.session_state["access_token"]
+)

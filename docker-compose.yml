@@ -28,6 +28,15 @@ x-app: &app
     METRICS_TOKEN: ${METRICS_TOKEN:-}
     DEMO_ADMIN_EMAIL: ${DEMO_ADMIN_EMAIL:-admin@demo.local}
     DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-}
+    # Gmail (#86): el listener lee la bandeja y la API envía las notificaciones.
+    GMAIL_CREDENTIALS_PATH: /run/secrets/gmail/credentials.json
+    GMAIL_TOKEN_PATH: /run/secrets/gmail/token.json
+    GMAIL_QUERY: ${GMAIL_QUERY:-in:inbox has:attachment newer_than:7d}
+    GMAIL_MAX_RESULTS: ${GMAIL_MAX_RESULTS:-50}
+    POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-60}
+    # Asistente (#87).
+    CHAT_MODEL: ${CHAT_MODEL:-}
+    CHAT_DAILY_LIMIT: ${CHAT_DAILY_LIMIT:-100}
   volumes:
     - app-data:/app/data
 
@@ -66,6 +75,10 @@ services:
     environment:
       <<: *app-env
       ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
+    volumes:
+      - app-data:/app/data
+      # Para enviar la notificación de ranking listo (#50, #86).
+      - ./secrets:/run/secrets/gmail
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -107,11 +120,6 @@ services:
     <<: *app
     profiles: ["gmail"]
     command: ["python", "run_listener.py"]
-    environment:
-      <<: *app-env
-      GMAIL_CREDENTIALS_PATH: /run/secrets/gmail/credentials.json
-      GMAIL_TOKEN_PATH: /run/secrets/gmail/token.json
-      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-60}
     volumes:
       - app-data:/app/data
       # token.json se refresca solo, por eso el montaje es de escritura.

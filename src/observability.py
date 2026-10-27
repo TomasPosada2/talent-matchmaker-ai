@@ -166,12 +166,18 @@ def umbral_tasa_fallos_lote() -> float:
 # Heartbeat del listener
 # ------------------------------------------------------------
 
-def escribir_heartbeat(ruta: Path, estado: str, detalle: str | None = None) -> None:
+def escribir_heartbeat(
+    ruta: Path,
+    estado: str,
+    detalle: str | None = None,
+    extra: dict | None = None,
+) -> None:
     ruta = Path(ruta)
     ruta.parent.mkdir(parents=True, exist_ok=True)
     ruta.write_text(
         json.dumps(
             {
+                **(extra or {}),
                 "timestamp": time.time(),
                 "estado": estado,
                 "detalle": detalle,

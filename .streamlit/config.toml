@@ -1,0 +1,31 @@
+# Tema del dashboard (Sprint 8 - #89).
+# Streamlit lee este archivo desde el directorio de trabajo (/app en Docker).
+
+[client]
+# Oculta el botón "Deploy" y deja solo el menú mínimo.
+toolbarMode = "minimal"
+
+[theme]
+base = "light"
+primaryColor = "#4F46E5"
+backgroundColor = "#F8FAFC"
+secondaryBackgroundColor = "#EEF2F7"
+textColor = "#0F172A"
+linkColor = "#4338CA"
+borderColor = "#E2E8F0"
+showWidgetBorder = true
+showSidebarBorder = false
+baseRadius = "0.75rem"
+baseFontSize = 15
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFontSizes = ["1.875rem", "1.25rem", "1.05rem"]
+headingFontWeights = [700, 600, 600]
+chartCategoricalColors = ["#4F46E5", "#0EA5E9", "#F59E0B", "#10B981", "#EC4899"]
+
+[theme.sidebar]
+backgroundColor = "#0F172A"
+secondaryBackgroundColor = "#1E293B"
+textColor = "#CBD5E1"
+primaryColor = "#818CF8"
+borderColor = "#1E293B"

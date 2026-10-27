@@ -10,7 +10,7 @@ import httpx
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from dashboard import api_client
+from dashboard import api_client, assistant_page, gmail_status
 
 PERFIL = {
     "email_id": "email_001",
@@ -42,6 +42,9 @@ def api_falsa(ruta, token=None):
 @pytest.fixture
 def app(monkeypatch):
     monkeypatch.setattr(api_client, "consultar_api", api_falsa)
+    # Estos módulos importan consultar_api por nombre.
+    monkeypatch.setattr(gmail_status, "consultar_api", api_falsa)
+    monkeypatch.setattr(assistant_page, "consultar_api", api_falsa)
     main = Path(__file__).resolve().parents[1] / "dashboard" / "main.py"
     return AppTest.from_file(str(main), default_timeout=30)
 
@@ -73,7 +76,7 @@ def test_admin_ve_administracion(app):
     app.sidebar.radio[0].set_value("Administración").run()
 
     assert not app.exception
-    assert app.title[0].value == "Administración"
+    assert any("<h1>Administración</h1>" in m.value for m in app.markdown)
     assert "Crear cuenta" in [h.value for h in app.header]
 
 

@@ -1,5 +1,18 @@
+"""
+Lectura de correos reales de Gmail.
+
+Sprint 5 - Issue #11: Gmail -> CorreoDetectado para el pipeline existente.
+
+Sprint 8 - Issue #86:
+- Solo se leen los correos que cumplen GMAIL_QUERY (por defecto, correos
+  recientes de la bandeja de entrada con adjuntos), para no procesar
+  facturas, boletines o fotos de una bandeja real.
+- Los resultados se paginan hasta GMAIL_MAX_RESULTS.
+"""
+
 import base64
 import logging
+import os
 from pathlib import Path
 
 from googleapiclient.discovery import build
@@ -8,6 +21,62 @@ from .email_detector import FORMATOS_SOPORTADOS, CorreoDetectado
 from .gmail_auth import obtener_credenciales_gmail
 
 logger = logging.getLogger("gmail_inbox")
+
+CONSULTA_POR_DEFECTO = "in:inbox has:attachment newer_than:7d"
+TAMANO_PAGINA_GMAIL = 100
+
+
+def obtener_consulta_gmail() -> str:
+    """Búsqueda de Gmail que define qué correos entran al pipeline."""
+    return os.getenv("GMAIL_QUERY", CONSULTA_POR_DEFECTO)
+
+
+def obtener_max_resultados() -> int:
+    return int(os.getenv("GMAIL_MAX_RESULTS", "50"))
+
+
+def _construir_servicio():
+    return build(
+        "gmail",
+        "v1",
+        credentials=obtener_credenciales_gmail(),
+        cache_discovery=False,
+    )
+
+
+def obtener_cuenta_gmail() -> str:
+    """Correo de la cuenta de Gmail autorizada."""
+    perfil = _construir_servicio().users().getProfile(userId="me").execute()
+    return perfil.get("emailAddress", "")
+
+
+def _listar_ids_mensajes(
+    servicio,
+    consulta: str,
+    max_resultados: int,
+) -> list[str]:
+    """Recorre las páginas de resultados hasta juntar max_resultados ids."""
+    ids: list[str] = []
+    token_pagina = None
+
+    while len(ids) < max_resultados:
+        parametros = {
+            "userId": "me",
+            "maxResults": min(TAMANO_PAGINA_GMAIL, max_resultados - len(ids)),
+        }
+        if consulta:
+            parametros["q"] = consulta
+        if token_pagina:
+            parametros["pageToken"] = token_pagina
+
+        respuesta = servicio.users().messages().list(**parametros).execute()
+        ids.extend(mensaje["id"] for mensaje in respuesta.get("messages", []))
+
+        token_pagina = respuesta.get("nextPageToken")
+        if not token_pagina:
+            break
+
+    return ids[:max_resultados]
 
 
 def _obtener_header(headers: list[dict], nombre: str) -> str | None:
@@ -63,7 +132,8 @@ def _descargar_adjunto(
 
 def obtener_correos_gmail(
     carpeta_descargas: Path,
-    max_resultados: int = 50,
+    max_resultados: int | None = None,
+    consulta: str | None = None,
 ) -> list[CorreoDetectado]:
     """
     Lee correos reales de Gmail y devuelve objetos CorreoDetectado,
@@ -71,34 +141,22 @@ def obtener_correos_gmail(
 
     Los adjuntos soportados se descargan localmente para que las etapas
     posteriores puedan procesarlos sin conocer detalles de Gmail.
+
+    Sin argumentos, usa GMAIL_QUERY y GMAIL_MAX_RESULTS.
     """
     carpeta_descargas = Path(carpeta_descargas)
     carpeta_descargas.mkdir(parents=True, exist_ok=True)
 
-    credenciales = obtener_credenciales_gmail()
+    if max_resultados is None:
+        max_resultados = obtener_max_resultados()
+    if consulta is None:
+        consulta = obtener_consulta_gmail()
 
-    servicio = build(
-        "gmail",
-        "v1",
-        credentials=credenciales,
-        cache_discovery=False,
-    )
-
-    respuesta = (
-        servicio.users()
-        .messages()
-        .list(
-            userId="me",
-            maxResults=max_resultados,
-        )
-        .execute()
-    )
-
-    mensajes = respuesta.get("messages", [])
+    servicio = _construir_servicio()
+    ids_mensajes = _listar_ids_mensajes(servicio, consulta, max_resultados)
     resultados = []
 
-    for referencia in mensajes:
-        message_id = referencia["id"]
+    for message_id in ids_mensajes:
 
         mensaje = (
             servicio.users()

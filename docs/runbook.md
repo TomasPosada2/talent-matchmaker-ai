@@ -171,6 +171,35 @@ Las tablas se crean o migran solas al arrancar (`CREATE TABLE IF NOT EXISTS`
 y `ADD COLUMN IF NOT EXISTS`). Si algo falla, vuelve al commit anterior con
 `git checkout <commit>` y repite `docker compose up -d --build`.
 
+### Demo pública en Render (plan gratuito)
+
+`render.yaml` define un servicio web (API y dashboard en un solo contenedor,
+arrancados por `deploy/render-start.sh`) y una base PostgreSQL administrada.
+La API solo escucha en `localhost` dentro del contenedor; lo público es el
+dashboard.
+
+1. En https://dashboard.render.com: **New → Blueprint** y elige este
+   repositorio y la rama a desplegar.
+2. Render pide `ANTHROPIC_API_KEY`. Vacía, solo funciona el modo
+   *Demostración gratuita* del ranking y el asistente queda apagado.
+   `JWT_SECRET` se genera solo.
+3. Cuando el servicio quede *Live*, carga los datos de demostración desde tu
+   máquina. ClamAV corre en local y los perfiles se escriben en la base de
+   Render (copia la **External Database URL** desde la página de la base):
+
+   ```bash
+   docker compose up -d clamav          # espera a que quede healthy
+   docker compose run --rm --no-deps \
+     -e DATABASE_URL="<External Database URL>" \
+     -e DEMO_ADMIN_PASSWORD="<contraseña de al menos 8 caracteres>" \
+     api python scripts/seed_demo.py
+   ```
+
+Límites del plan gratuito: el servicio se duerme tras 15 minutos sin uso (la
+primera visita tarda alrededor de un minuto), tiene 512 MB de RAM y la base
+gratuita vence a los 30 días. El listener de Gmail, los backups y Prometheus
+no corren en Render.
+
 ## 5. Backups y recuperación ante desastres (#67)
 
 **Qué se respalda:** el servicio `backup` corre `scripts/backup.sh` cada

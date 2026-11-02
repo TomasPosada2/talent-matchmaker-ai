@@ -1,0 +1,45 @@
+# Despliegue público en Render (plan gratuito). Ver docs/runbook.md §Render.
+#
+# Un solo servicio web corre la API (interna, localhost:8000) y el dashboard
+# (público). PostgreSQL es la base administrada de Render.
+
+services:
+  - type: web
+    name: talent-matchmaker
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh deploy/render-start.sh
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: APP_ENV
+        value: produccion
+      - key: DATABASE_URL
+        fromDatabase:
+          name: talent-matchmaker-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: API_URL
+        value: http://127.0.0.1:8000
+      - key: PYTHONPATH
+        value: /app
+      - key: ENABLE_API_DOCS
+        value: "false"
+      - key: LOG_FORMAT
+        value: json
+      - key: CLAUDE_MODEL
+        value: claude-sonnet-5
+      - key: CHAT_DAILY_LIMIT
+        value: "100"
+      # Se piden al crear el Blueprint; vacío = solo modo demostración.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: DEMO_ADMIN_EMAIL
+        value: admin@demo.local
+
+databases:
+  - name: talent-matchmaker-db
+    plan: free
+    databaseName: talent_matchmaker
+    user: talent

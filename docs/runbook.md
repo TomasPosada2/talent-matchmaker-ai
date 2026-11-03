@@ -200,6 +200,24 @@ primera visita tarda alrededor de un minuto), tiene 512 MB de RAM y la base
 gratuita vence a los 30 días. El listener de Gmail, los backups y Prometheus
 no corren en Render.
 
+#### Leer Gmail hacia la demo de Render
+
+El lector y ClamAV corren en una máquina propia y guardan los candidatos en
+la base de Render. Requiere Gmail autorizado (sección 3.2) y, en `.env`,
+`RENDER_DATABASE_URL` con la External Database URL terminada en
+`?sslmode=require`.
+
+```bash
+docker compose -p talent-render -f docker-compose.yml -f docker-compose.render.yml up -d listener
+docker compose -p talent-render -f docker-compose.yml -f docker-compose.render.yml logs -f listener
+```
+
+Solo procesa correos mientras la máquina y Docker estén encendidos (activa
+*Start Docker Desktop when you sign in*). El indicador "Gmail no conectado"
+del dashboard público se mantiene porque el heartbeat del lector queda en
+esta máquina. Si rotas la contraseña de la base en Render, actualiza
+`RENDER_DATABASE_URL` y repite el `up -d`.
+
 ## 5. Backups y recuperación ante desastres (#67)
 
 **Qué se respalda:** el servicio `backup` corre `scripts/backup.sh` cada

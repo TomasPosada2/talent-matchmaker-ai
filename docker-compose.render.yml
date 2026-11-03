@@ -1,0 +1,22 @@
+# Lector de Gmail en esta máquina que guarda los candidatos en la base de
+# Render (la demo pública no tiene RAM para ClamAV). Ver docs/runbook.md.
+#
+#   docker compose -p talent-render -f docker-compose.yml -f docker-compose.render.yml up -d listener
+#
+# Proyecto aparte (-p) con su propio volumen: el estado de correos ya leídos
+# del stack local no se mezcla con el de Render.
+
+services:
+  listener:
+    profiles: []
+    environment:
+      DATABASE_URL: ${RENDER_DATABASE_URL:?Define RENDER_DATABASE_URL en .env (External Database URL de Render)}
+    volumes: !override
+      - render-listener-data:/app/data
+      - ./secrets:/run/secrets/gmail
+    depends_on: !override
+      clamav:
+        condition: service_healthy
+
+volumes:
+  render-listener-data:
